@@ -1,0 +1,392 @@
+import React, { useState, useEffect } from 'react';
+import { StoreProvider, useStore } from '../store/StoreContext';
+import { UIProvider } from '../store/UIContext';
+import POS from './POS';
+import Inventory from './Inventory';
+import Dashboard from './Dashboard';
+import ShopSetup from './ShopSetup';
+import Orders from './Orders';
+import Customers from './Customers';
+import Settings from './Settings';
+import ReceiptView from './ReceiptView';
+import PublicStore from './PublicStore';
+import Tables from './Tables';
+import Login from './Login';
+import Kitchen from './Kitchen';
+import CommunityLicense from './CommunityLicense';
+import UserManual from './UserManual';
+import { LockScreen } from '../components/LockScreen';
+import { LayoutGrid, ShoppingCart, BarChart3, Globe, LogOut, FileText, Settings as SettingsIcon, Utensils, Calendar, Loader2, Users, Lock, ChefHat } from 'lucide-react';
+import { Logo } from '../components/Logo';
+
+// --- Top Bar Component (Mobile) ---
+const TopBar = () => {
+    const { language, setLanguage, currentShop, activeStaff, logoutStaff, settings, t } = useStore();
+    
+    const [showLangMenu, setShowLangMenu] = useState(false);
+
+    // Role Badge Colors
+    const getRoleBadgeStyle = (role: string) => {
+        switch(role) {
+            case 'admin': return 'bg-purple-50 border-purple-100 text-purple-700';
+            case 'manager': return 'bg-blue-50 border-blue-100 text-blue-700';
+            case 'waiter': return 'bg-orange-50 border-orange-100 text-orange-700';
+            case 'kitchen': return 'bg-red-50 border-red-100 text-red-700';
+            default: return 'bg-gray-50 border-gray-100 text-gray-700';
+        }
+    };
+
+    const badgeStyle = activeStaff ? getRoleBadgeStyle(activeStaff.role) : '';
+
+    return (
+        <header className="md:hidden fixed top-0 left-0 right-0 h-[60px] bg-white/80 backdrop-blur-xl border-b border-gray-100 z-50 px-4 flex justify-between items-center shadow-sm">
+            <Logo className="w-8 h-8" textClassName="text-lg" />
+            <div className="flex items-center gap-2">
+                 {activeStaff && settings.enableMultiRoles && (
+                     <button 
+                        onClick={logoutStaff}
+                        className={`flex items-center gap-2 px-2 py-1 rounded-full border transition-all active:scale-95 ${badgeStyle}`}
+                     >
+                         <div className="w-6 h-6 bg-white/50 rounded-full flex items-center justify-center text-[10px] font-bold shadow-sm">
+                             {activeStaff.name.substring(0,2).toUpperCase()}
+                         </div>
+                         <div className="flex flex-col items-start leading-none mr-1">
+                             <span className="text-[10px] font-bold">{activeStaff.name}</span>
+                             <span className="text-[8px] opacity-70 uppercase">{activeStaff.role}</span>
+                         </div>
+                         <Lock size={12} className="opacity-50" />
+                     </button>
+                 )}
+                <div className="relative">
+                    <button 
+                        onClick={() => setShowLangMenu(!showLangMenu)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-50 hover:bg-gray-100 rounded-full border border-gray-100 transition-colors"
+                    >
+                        <Globe size={14} className="text-brand-600" />
+                        <span className="text-xs font-bold text-gray-700 uppercase">{language}</span>
+                    </button>
+                    {showLangMenu && (
+                        <>
+                            <div className="fixed inset-0 z-40" onClick={() => setShowLangMenu(false)}></div>
+                            <div className="absolute right-0 top-full mt-2 bg-white rounded-xl shadow-xl border border-gray-100 p-1 z-50 flex flex-col min-w-[100px]">
+                                {['en', 'km', 'zh', 'ja', 'ko'].map((lang: any) => (
+                                    <button
+                                        key={lang}
+                                        onClick={() => { setLanguage(lang); setShowLangMenu(false); }}
+                                        className={`px-4 py-2 text-left text-sm font-bold rounded-lg hover:bg-gray-50 ${language === lang ? 'text-brand-600 bg-brand-50' : 'text-gray-600'}`}
+                                    >
+                                        {lang === 'en' && 'English'}
+                                        {lang === 'km' && 'ខ្មែរ'}
+                                        {lang === 'zh' && '中文'}
+                                        {lang === 'ja' && '日本語'}
+                                        {lang === 'ko' && '한국어'}
+                                    </button>
+                                ))}
+                            </div>
+                        </>
+                    )}
+                </div>
+            </div>
+        </header>
+    );
+};
+
+// --- Navigation Component ---
+const Navigation = ({ currentTab, setTab }: { currentTab: string, setTab: (t: string) => void }) => {
+  const { language, setLanguage, t, logoutStaff, currentShop, settings, activeStaff, user } = useStore();
+
+  const isRestaurant = currentShop?.type === 'restaurant';
+  
+  // ROLE BASED PERMISSIONS
+  const role = activeStaff?.role || 'cashier';
+  const isAdmin = role === 'admin' || role === 'manager';
+  const isWaiter = role === 'waiter';
+  const isKitchen = role === 'kitchen';
+
+  // "Tables" or "Rooms" logic
+  // Enabled for everyone now, icon changes based on type
+  const tableIcon = isRestaurant ? Utensils : LayoutGrid;
+  const tableLabel = t('nav.tables'); // Uses "Tables" translation, conceptually matches "Rooms"
+
+  const allNavItems = [
+    { id: 'pos', icon: ShoppingCart, label: t('nav.pos'), allowed: !isKitchen }, 
+    { id: 'inventory', icon: LayoutGrid, label: t('nav.inventory'), allowed: !isWaiter && !isKitchen },
+    { id: 'tables', icon: tableIcon, label: tableLabel, allowed: !isKitchen },
+    { id: 'kitchen', icon: ChefHat, label: t('nav.kitchen'), allowed: isRestaurant && (isAdmin || isKitchen) }, // Only for Restaurant
+    { id: 'orders', icon: FileText, label: t('nav.orders'), allowed: !isKitchen },
+    { id: 'customers', icon: Users, label: t('nav.customers'), allowed: !isWaiter && !isKitchen },
+    { id: 'dashboard', icon: BarChart3, label: t('nav.dashboard'), allowed: isAdmin },
+    { id: 'settings', icon: SettingsIcon, label: t('nav.settings'), allowed: isAdmin },
+  ];
+
+  const navItems = allNavItems.filter(i => i.allowed);
+
+  return (
+    <>
+      {/* Mobile Bottom Nav */}
+      <div className="md:hidden fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-xl border-t border-gray-200 flex items-center px-2 py-2 z-50 pb-safe shadow-[0_-4px_20px_rgba(0,0,0,0.03)] overflow-x-auto no-scrollbar gap-1">
+        {navItems.map(item => {
+           const isActive = currentTab === item.id;
+           return (
+            <button
+                key={item.id}
+                onClick={() => setTab(item.id)}
+                className={`relative flex flex-col items-center justify-center p-2 rounded-2xl min-w-[70px] flex-1 transition-all duration-300 shrink-0 ${isActive ? 'text-brand-600' : 'text-gray-400 hover:text-gray-600'}`}
+            >
+                <div className={`p-1.5 rounded-xl transition-all duration-300 ${isActive ? 'bg-brand-50 translate-y-[-2px]' : ''}`}>
+                    <item.icon size={24} strokeWidth={isActive ? 2.5 : 2} />
+                </div>
+                <span className={`text-[10px] mt-1 font-bold ${language === 'km' ? 'font-display' : ''} ${isActive ? 'opacity-100' : 'opacity-70'}`}>
+                    {item.label}
+                </span>
+            </button>
+          )
+        })}
+      </div>
+
+      {/* Desktop Sidebar */}
+      <div className="hidden md:flex flex-col w-64 bg-white border-r border-gray-200 h-full p-6 z-50 shadow-soft">
+        <div className="mb-8 px-2">
+           <Logo className="w-10 h-10" textClassName="text-2xl" />
+        </div>
+        
+        {currentShop && (
+            <div className="mb-6 px-4 py-3 bg-brand-50 rounded-2xl border border-brand-100">
+                <p className="text-[10px] uppercase font-bold text-brand-400 mb-1">{t('nav.current_shop')}</p>
+                <h3 className={`font-bold text-brand-900 truncate ${language === 'km' ? 'font-display' : ''}`}>
+                    {currentShop.name}
+                </h3>
+            </div>
+        )}
+
+        <div className="flex flex-col gap-3 w-full">
+            {navItems.map(item => {
+                const isActive = currentTab === item.id;
+                return (
+                    <button
+                        key={item.id}
+                        onClick={() => setTab(item.id)}
+                        className={`flex items-center gap-4 px-4 py-3.5 rounded-2xl transition-all duration-200 group ${
+                            isActive 
+                            ? 'bg-brand-600 text-white shadow-lg shadow-brand-200' 
+                            : 'text-gray-500 hover:bg-gray-50'
+                        }`}
+                    >
+                        <item.icon size={22} strokeWidth={isActive ? 2.5 : 2} className={isActive ? 'text-white' : 'text-gray-400 group-hover:text-gray-600'} />
+                        <span className={`font-bold text-sm ${language === 'km' ? 'font-display' : ''}`}>{item.label}</span>
+                    </button>
+                )
+            })}
+        </div>
+
+        <div className="mt-auto space-y-4">
+            {/* Operator Card */}
+            {activeStaff && settings.enableMultiRoles && (
+                <div className="flex items-center gap-3 p-3 bg-slate-50 rounded-xl border border-gray-100">
+                    <div className="w-10 h-10 bg-brand-100 text-brand-600 rounded-full flex items-center justify-center font-bold">
+                        {activeStaff.name.substring(0,2).toUpperCase()}
+                    </div>
+                    <div className="flex-1 overflow-hidden">
+                        <p className="font-bold text-sm truncate">{activeStaff.name}</p>
+                        <p className="text-xs text-gray-500 uppercase">{activeStaff.role}</p>
+                    </div>
+                </div>
+            )}
+
+            <button 
+                onClick={logoutStaff}
+                className="w-full flex items-center gap-3 px-4 py-3 text-gray-500 hover:bg-red-50 hover:text-red-600 rounded-2xl transition-colors font-medium text-sm"
+            >
+                {user && settings.enableMultiRoles ? <Lock size={20} /> : <LogOut size={20} />}
+                <span>{user && settings.enableMultiRoles ? t('lock.lock_screen') : t('lock.logout')}</span>
+            </button>
+
+            <div className="bg-gradient-to-br from-gray-50 to-gray-100 rounded-2xl p-4 border border-gray-100">
+                <p className="text-xs text-gray-500 mb-3 font-medium">{t('common.switch_lang')}</p>
+                <div className="grid grid-cols-3 gap-1 bg-white p-1 rounded-xl shadow-sm border border-gray-100">
+                    {['en', 'km', 'zh'].map((lang: any) => (
+                        <button 
+                            key={lang}
+                            onClick={() => setLanguage(lang)}
+                            className={`py-1.5 text-[10px] font-bold rounded-lg transition-all ${language === lang ? 'bg-brand-100 text-brand-700 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}
+                        >
+                            {lang === 'en' ? 'ENG' : (lang === 'km' ? 'KH' : 'CN')}
+                        </button>
+                    ))}
+                    {['ja', 'ko'].map((lang: any) => (
+                        <button 
+                            key={lang}
+                            onClick={() => setLanguage(lang)}
+                            className={`py-1.5 text-[10px] font-bold rounded-lg transition-all ${language === lang ? 'bg-brand-100 text-brand-700 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}
+                        >
+                            {lang === 'ja' ? 'JP' : 'KR'}
+                        </button>
+                    ))}
+                </div>
+            </div>
+        </div>
+      </div>
+    </>
+  );
+};
+
+const MainContent = () => {
+    const [activeTab, setActiveTab] = useState('pos');
+    const { currentShop, user, loadingAuth, activeStaff, settings, staffList, switchStaff } = useStore();
+    const [viewMode, setViewMode] = useState<'app' | 'receipt' | 'store' | 'license' | 'manual'>('app');
+    const [receiptId, setReceiptId] = useState<string | null>(null);
+
+    // Parse URL params & Path for routing logic
+    useEffect(() => {
+        const hash = window.location.hash; // e.g. "#/s/123"
+        const params = new URLSearchParams(window.location.search);
+        
+        // 1. Hash-based Routing (New Standard)
+        // Matches #/s/ID or #/s/ID?params
+        const shopMatch = hash.match(/^#\/s\/([^/?]+)/);
+        const receiptMatch = hash.match(/^#\/r\/([^/?]+)/);
+
+        if (receiptMatch && receiptMatch[1]) {
+            setReceiptId(receiptMatch[1]);
+            setViewMode('receipt');
+            return;
+        }
+
+        if (shopMatch && shopMatch[1]) {
+            setViewMode('store');
+            return;
+        }
+
+        // 2. Query Param Routing (Legacy)
+        const mode = params.get('mode');
+        if (mode === 'store') {
+            setViewMode('store');
+            return;
+        }
+        if (mode === 'license') {
+            setViewMode('license');
+            return;
+        }
+        if (mode === 'manual') {
+            setViewMode('manual');
+            return;
+        }
+
+        const orderId = params.get('orderId');
+        if (orderId) {
+            setActiveTab('orders');
+        }
+
+    }, []);
+
+    // Auto-login effect for single-role mode
+    useEffect(() => {
+        if (user && currentShop && !activeStaff && !settings.enableMultiRoles && staffList.length > 0) {
+            const admin = staffList.find(s => s.role === 'admin') || staffList[0];
+            if (admin) {
+                switchStaff(admin.pin, admin.id);
+            }
+        }
+    }, [user, currentShop, activeStaff, settings.enableMultiRoles, staffList, switchStaff]);
+
+    // Force redirect to Kitchen view if user is kitchen role
+    useEffect(() => {
+        if (activeStaff?.role === 'kitchen' && activeTab !== 'kitchen') {
+            setActiveTab('kitchen');
+        }
+    }, [activeStaff, activeTab]);
+
+    // 1. License Page (Public)
+    if (viewMode === 'license') {
+        return <CommunityLicense />;
+    }
+
+    // 2. User Manual (Public)
+    if (viewMode === 'manual') {
+        return <UserManual />;
+    }
+
+    // 3. Receipt View (Public)
+    if (viewMode === 'receipt' && receiptId) {
+        return <ReceiptView receiptId={receiptId} />;
+    }
+
+    // 4. Public Store View (Public)
+    if (viewMode === 'store') {
+        return <PublicStore />;
+    }
+
+    // 5. Admin Views (Protected)
+    
+    // Auth Loading
+    if (loadingAuth) {
+        return (
+            <div className="h-[100dvh] w-full flex items-center justify-center bg-slate-50">
+                <Loader2 className="animate-spin text-brand-600" size={48} />
+            </div>
+        );
+    }
+
+    // --- ACCESS LOGIC ---
+    
+    // Condition 1: Not Logged in at all (Neither Owner nor Staff)
+    if (!user && !activeStaff) {
+        return <Login />;
+    }
+
+    // Condition 2: Owner Logged in but No Shop Set Up
+    if (user && !currentShop) {
+        return <ShopSetup />;
+    }
+
+    // Condition 3: Shared Device Lock (Owner logged in, but no active operator selected)
+    if (user && currentShop && !activeStaff) {
+        // If multi-roles is enabled OR if there are no staff members to auto-login as (prevents infinite loader)
+        if (settings.enableMultiRoles || staffList.length === 0) {
+            return <LockScreen />;
+        } else {
+            // Auto-login is attempting to run
+            return (
+                <div className="h-[100dvh] w-full flex items-center justify-center bg-slate-50">
+                    <Loader2 className="animate-spin text-brand-600" size={48} />
+                </div>
+            );
+        }
+    }
+
+    // Condition 4: Authorized Access (Either Owner+ActiveStaff OR StaffLogin)
+    // Main App
+    return (
+        <div className="flex h-[100dvh] w-full bg-slate-50 overflow-hidden">
+            <Navigation currentTab={activeTab} setTab={setActiveTab} />
+            
+            <main className="flex-1 h-full overflow-hidden relative flex flex-col">
+                <TopBar />
+                
+                {/* Content Container - Use flex-1 with min-h-0 to ensure children can scroll */}
+                <div className="flex-1 overflow-hidden pt-[60px] pb-[85px] md:pt-0 md:pb-0 h-full w-full relative flex flex-col min-h-0">
+                    {activeTab === 'pos' && <POS />}
+                    {activeTab === 'inventory' && <Inventory />}
+                    {activeTab === 'tables' && <Tables />}
+                    {activeTab === 'orders' && <Orders />}
+                    {activeTab === 'customers' && <Customers />}
+                    {activeTab === 'dashboard' && <Dashboard />}
+                    {activeTab === 'settings' && <Settings />}
+                    {activeTab === 'kitchen' && <Kitchen />}
+                </div>
+            </main>
+        </div>
+    );
+};
+
+const App: React.FC = () => {
+  return (
+    <StoreProvider>
+      <UIProvider>
+        <MainContent />
+      </UIProvider>
+    </StoreProvider>
+  );
+};
+
+export default App;

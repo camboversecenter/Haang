@@ -1,0 +1,9 @@
+
+name = "haang-pos"
+compatibility_date = "2024-09-23"
+pages_build_output_dir = "dist"
+
+[vars]
+# Environment variables can be defined here or in the Cloudflare dashboard
+# VITE_SUPABASE_URL = "..."
+# VITE_SUPABASE_ANON_KEY = "..."
