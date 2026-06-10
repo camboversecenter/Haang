@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { supabase } from '../services/supabaseClient';
+import { supabase, setSupabaseStaffHeaders } from '../services/supabaseClient';
 import { DB_CONSTANTS } from '../services/supabaseSchema';
 import { printer } from '../services/printerService';
 import { 
@@ -262,10 +262,17 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     return () => authListener.subscription.unsubscribe();
   }, []);
 
-  const loadShopData = async (userId: string) => {
+  useEffect(() => {
+    setSupabaseStaffHeaders(activeStaff?.role, activeStaff?.id);
+  }, [activeStaff]);
+
+  const loadShopData = async (param: string | { shopId: string }) => {
       setLoadingAuth(true);
       try {
-          const { data: shops } = await supabase.from(DB_CONSTANTS.TABLE_SHOPS).select('*').eq('owner_id', userId).limit(1);
+          const query = typeof param === 'string'
+              ? supabase.from(DB_CONSTANTS.TABLE_SHOPS).select('*').eq('owner_id', param).limit(1)
+              : supabase.from(DB_CONSTANTS.TABLE_SHOPS).select('*').eq('id', param.shopId).limit(1);
+          const { data: shops } = await query;
           if (shops && shops.length > 0) {
               const shop = shops[0];
               const mappedShop: Shop = { 
@@ -369,6 +376,17 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const loginAsStaff = async (phone: string, pin: string) => {
       const { data, error } = await supabase.rpc(DB_CONSTANTS.RPC_STAFF_LOGIN, { phone_number: phone, pin_code: pin });
       if (data && data.length > 0) {
+          const s = data[0];
+          const loggedStaff: Staff = {
+              id: s.id,
+              shopId: s.shop_id,
+              name: s.name,
+              pin: pin,
+              role: s.role,
+              avatarUrl: s.avatar_url
+          };
+          setActiveStaff(loggedStaff);
+          await loadShopData({ shopId: s.shop_id });
           return true;
       }
       return false;

@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <!-- Background Gradient -->
+    <linearGradient id="indigoTealGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#4f46e5" />
+      <stop offset="100%" stop-color="#6366f1" />
+    </linearGradient>
+    
+    <!-- Accent Gradient -->
+    <linearGradient id="tealGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#14b8a6" />
+      <stop offset="100%" stop-color="#0d9488" />
+    </linearGradient>
+    
+    <!-- Sophisticated drop shadow for the logo elements -->
+    <filter id="softShadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#000000" flood-opacity="0.25"/>
+    </filter>
+  </defs>
+
+  <!-- Rounded Square App Background (Squircle) -->
+  <rect x="24" y="24" width="464" height="464" rx="108" fill="url(#indigoTealGrad)" />
+
+  <!-- Inner Soft Decorative Ring -->
+  <rect x="40" y="40" width="432" height="432" rx="92" fill="none" stroke="#ffffff" stroke-opacity="0.1" stroke-width="4" />
+
+  <!-- Main POS and Khmer Typography Group -->
+  <g filter="url(#softShadow)" transform="translate(0, -10)">
+    <!-- Cash Register & Cart Geometric Fusion Icon -->
+    <path d="M128 320h256v40a16 16 0 0 1-16 16H144a16 16 0 0 1-16-16v-40z" fill="#ffffff" />
+    <path d="M148 180h216a12 12 0 0 1 12 12v116H136V192a12 12 0 0 1 12-12z" fill="url(#tealGrad)" opacity="0.95" />
+    
+    <!-- Receipt Slip paper emerging from POS -->
+    <path d="M224 120h64v60h-64z" fill="#ffffff" />
+    <path d="M224 180l8-8 8 8 8-8 8 8 8-8 8 8 8-8 8 8" fill="none" stroke="#ffffff" stroke-width="2" />
+    <line x1="236" y1="136" x2="276" y2="136" stroke="#cbd5e1" stroke-width="3" stroke-linecap="round" />
+    <line x1="236" y1="148" x2="264" y2="148" stroke="#cbd5e1" stroke-width="3" stroke-linecap="round" />
+    <line x1="236" y1="160" x2="272" y2="160" stroke="#cbd5e1" stroke-width="3" stroke-linecap="round" />
+
+    <!-- Button Keys on Cash Register base -->
+    <rect x="160" y="336" width="24" height="12" rx="3" fill="#cbd5e1"/>
+    <rect x="200" y="336" width="24" height="12" rx="3" fill="#cbd5e1"/>
+    <rect x="240" y="336" width="24" height="12" rx="3" fill="#cbd5e1"/>
+    <rect x="288" y="336" width="24" height="12" rx="3" fill="#cbd5e1"/>
+    <rect x="328" y="336" width="24" height="12" rx="3" fill="#cbd5e1"/>
+    
+    <!-- Elegant stylized Khmer lettering 'ហាង' (meaning Shop/POS) centered in teal screen -->
+    <text x="256" y="274" font-family="'Kantumruy Pro', 'Noto Sans Khmer', 'Khmer OS Muol Light', sans-serif" font-size="64" font-weight="bold" fill="#ffffff" text-anchor="middle" letter-spacing="1">ហាង</text>
+  </g>
+</svg>

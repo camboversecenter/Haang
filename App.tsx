@@ -203,9 +203,69 @@ const Navigation = ({ currentTab, setTab }: { currentTab: string, setTab: (t: st
 
 const MainContent = () => {
     const [activeTab, setActiveTab] = useState('pos');
-    const { currentShop, user, loadingAuth, activeStaff, settings, staffList, switchStaff } = useStore();
+    const { currentShop, user, loadingAuth, activeStaff, settings, staffList, switchStaff, language } = useStore();
     const [viewMode, setViewMode] = useState<'app' | 'receipt' | 'store' | 'license' | 'manual'>('app');
     const [receiptId, setReceiptId] = useState<string | null>(null);
+
+    // --- PWA LOGIC & CONNECTION TRACKING ---
+    const [isOffline, setIsOffline] = useState(!navigator.onLine);
+    const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+    const [showInstallBanner, setShowInstallBanner] = useState(false);
+
+    useEffect(() => {
+        // Register Service Worker
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('/sw.js')
+                    .then((registration) => {
+                        console.log('[HAANG POS PWA] ServiceWorker registered with scope: ', registration.scope);
+                    })
+                    .catch((err) => {
+                        console.error('[HAANG POS PWA] ServiceWorker registration failed: ', err);
+                    });
+            });
+        }
+
+        // Track Network connection
+        const handleOnline = () => setIsOffline(false);
+        const handleOffline = () => setIsOffline(true);
+
+        window.addEventListener('online', handleOnline);
+        window.addEventListener('offline', handleOffline);
+
+        // Before Install Prompt Handler
+        const handleBeforeInstallPrompt = (e: any) => {
+            e.preventDefault();
+            setDeferredPrompt(e);
+            setShowInstallBanner(true);
+        };
+
+        window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt as any);
+
+        const handleAppInstalled = () => {
+            console.log('[HAANG POS PWA] App installed successfully');
+            setShowInstallBanner(false);
+            setDeferredPrompt(null);
+        };
+
+        window.addEventListener('appinstalled', handleAppInstalled);
+
+        return () => {
+            window.removeEventListener('online', handleOnline);
+            window.removeEventListener('offline', handleOffline);
+            window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt as any);
+            window.removeEventListener('appinstalled', handleAppInstalled);
+        };
+    }, []);
+
+    const triggerPwaInstall = async () => {
+        if (!deferredPrompt) return;
+        deferredPrompt.prompt();
+        const { outcome } = await deferredPrompt.userChoice;
+        console.log(`[HAANG POS PWA] User prompt decision: ${outcome}`);
+        setShowInstallBanner(false);
+        setDeferredPrompt(null);
+    };
 
     // Parse URL params & Path for routing logic
     useEffect(() => {
@@ -326,24 +386,73 @@ const MainContent = () => {
     // Condition 4: Authorized Access (Either Owner+ActiveStaff OR StaffLogin)
     // Main App
     return (
-        <div className="flex h-[100dvh] w-full bg-slate-50 overflow-hidden">
-            <Navigation currentTab={activeTab} setTab={setActiveTab} />
-            
-            <main className="flex-1 h-full overflow-hidden relative flex flex-col">
-                <TopBar />
-                
-                {/* Content Container - Use flex-1 with min-h-0 to ensure children can scroll */}
-                <div className="flex-1 overflow-hidden pt-[60px] pb-[85px] md:pt-0 md:pb-0 h-full w-full relative flex flex-col min-h-0">
-                    {activeTab === 'pos' && <POS />}
-                    {activeTab === 'inventory' && <Inventory />}
-                    {activeTab === 'tables' && <Tables />}
-                    {activeTab === 'orders' && <Orders />}
-                    {activeTab === 'customers' && <Customers />}
-                    {activeTab === 'dashboard' && <Dashboard />}
-                    {activeTab === 'settings' && <Settings />}
-                    {activeTab === 'kitchen' && <Kitchen />}
+        <div className="flex flex-col h-[100dvh] w-full bg-slate-50 overflow-hidden relative">
+            {isOffline && (
+                <div className="bg-amber-600 text-white text-center py-2 px-4 flex items-center justify-center gap-2 text-xs font-bold shadow-sm z-[9999] shrink-0 animate-pulse">
+                    <span className="w-2 h-2 rounded-full bg-white" />
+                    <span>
+                        {language === 'km' 
+                            ? 'របៀបក្រៅបណ្តាញ (Offline Mode) — ប្រព័ន្ធដំណើរការជាធម្មតា ទិន្នន័យត្រូវបានរក្សាទុកក្នុងម៉ាស៊ីនយ៉ាងមានសុវត្ថិភាព!' 
+                            : 'Offline Mode Active — App is running normally with fully cached local storage database.'}
+                    </span>
                 </div>
-            </main>
+            )}
+            
+            <div className="flex flex-1 h-full w-full bg-slate-50 overflow-hidden min-h-0 relative">
+                <Navigation currentTab={activeTab} setTab={setActiveTab} />
+                
+                <main className="flex-1 h-full overflow-hidden relative flex flex-col">
+                    <TopBar />
+                    
+                    {/* Content Container - Use flex-1 with min-h-0 to ensure children can scroll */}
+                    <div className="flex-1 overflow-hidden pt-[60px] pb-[85px] md:pt-0 md:pb-0 h-full w-full relative flex flex-col min-h-0">
+                        {activeTab === 'pos' && <POS />}
+                        {activeTab === 'inventory' && <Inventory />}
+                        {activeTab === 'tables' && <Tables />}
+                        {activeTab === 'orders' && <Orders />}
+                        {activeTab === 'customers' && <Customers />}
+                        {activeTab === 'dashboard' && <Dashboard />}
+                        {activeTab === 'settings' && <Settings />}
+                        {activeTab === 'kitchen' && <Kitchen />}
+                    </div>
+                </main>
+            </div>
+
+            {showInstallBanner && (
+                <div className="fixed bottom-24 md:bottom-6 right-6 max-w-sm bg-white border border-gray-100 rounded-2xl shadow-xl p-4 z-[9999] flex items-start gap-4 backdrop-blur-xl transition-all font-sans">
+                    <div className="w-10 h-10 bg-brand-50 text-brand-600 rounded-xl flex items-center justify-center shrink-0 shadow-inner">
+                        <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                            <polyline points="7 10 12 15 17 10" />
+                            <line x1="12" y1="15" x2="12" y2="3" />
+                        </svg>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                        <h4 className="text-sm font-bold text-gray-900 leading-tight">
+                            {language === 'km' ? 'ដំឡើងកម្មវិធី HAANG POS' : 'Install HAANG POS App'}
+                        </h4>
+                        <p className="text-xs text-gray-500 mt-1 leading-snug">
+                            {language === 'km' 
+                                ? 'ដំណើរការលឿន គ្រប់គ្រងការលក់ និងទិន្នន័យទោះគ្មានអ៊ីនធឺណិត!' 
+                                : 'Enable direct local speeds, quick-launch, and responsive offline operations.'}
+                        </p>
+                        <div className="flex gap-2 mt-3.5">
+                            <button 
+                                onClick={triggerPwaInstall}
+                                className="px-3.5 py-2 bg-brand-600 hover:bg-brand-700 active:scale-95 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-brand-100"
+                            >
+                                {language === 'km' ? 'ដំឡើងឥឡូវ' : 'Install Now'}
+                            </button>
+                            <button 
+                                onClick={() => setShowInstallBanner(false)}
+                                className="px-3.5 py-2 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-xl text-xs font-semibold transition-all"
+                            >
+                                {language === 'km' ? 'បិទ' : 'Dismiss'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };
