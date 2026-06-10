@@ -2,7 +2,7 @@
 // HAANG POS - PROGRESSIVE WEB APP SERVICE WORKER
 // ============================================================================
 
-const CACHE_NAME = 'haang-pos-cache-v1';
+const CACHE_NAME = 'haang-pos-cache-v2';
 
 // Static resources to pre-cache immediately on service worker installation
 const PRECACHE_ASSETS = [
