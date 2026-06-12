@@ -213,19 +213,6 @@ const MainContent = () => {
     const [showInstallBanner, setShowInstallBanner] = useState(false);
 
     useEffect(() => {
-        // Register Service Worker
-        if ('serviceWorker' in navigator) {
-            window.addEventListener('load', () => {
-                navigator.serviceWorker.register('/sw.js')
-                    .then((registration) => {
-                        console.log('[HAANG POS PWA] ServiceWorker registered with scope: ', registration.scope);
-                    })
-                    .catch((err) => {
-                        console.error('[HAANG POS PWA] ServiceWorker registration failed: ', err);
-                    });
-            });
-        }
-
         // Track Network connection
         const handleOnline = () => setIsOffline(false);
         const handleOffline = () => setIsOffline(true);

@@ -369,7 +369,14 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       }
   };
 
-  const signInWithGoogle = async () => { await supabase.auth.signInWithOAuth({ provider: 'google' }); };
+  const signInWithGoogle = async () => { 
+      await supabase.auth.signInWithOAuth({ 
+          provider: 'google',
+          options: {
+              redirectTo: window.location.origin
+          }
+      }); 
+  };
   const signInAsDemoUser = async () => { };
   const signOut = async () => { await supabase.auth.signOut(); setActiveStaff(null); };
 
