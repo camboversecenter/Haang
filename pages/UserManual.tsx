@@ -26,7 +26,7 @@ export default function UserManual() {
         {/* Intro */}
         <section className="text-center space-y-4">
           <h2 className="text-3xl md:text-4xl font-display font-bold text-brand-900 leading-tight">
-            របៀបប្រើប្រាស់ប្រព័ន្ធ HAANG
+            របៀបប្រើប្រាស់ប្រព័ន្ធ Little Tony APP
           </h2>
           <p className="text-slate-600 max-w-2xl mx-auto leading-relaxed">
             សូមស្វាគមន៍មកកាន់ប្រព័ន្ធគ្រប់គ្រងហាងឆ្លាតវៃ។ ឯកសារនេះនឹងណែនាំអ្នកអំពីមុខងារសំខាន់ៗដើម្បីជួយឱ្យអាជីវកម្មរបស់អ្នកដំណើរការដោយរលូន។

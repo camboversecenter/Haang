@@ -129,7 +129,7 @@ export class PrinterService {
     // 4. Footer
     addCmd(this.CMD.ALIGN_CENTER);
     addText(this.CMD.LF + "Thank You!" + this.CMD.LF);
-    addText("Powered by HAANG POS" + this.CMD.LF);
+    addText("Powered by Little Tony APP" + this.CMD.LF);
     addText(this.CMD.LF + this.CMD.LF + this.CMD.LF); // Feed
     // addCmd(this.CMD.CUT); // Optional: Cut paper
 

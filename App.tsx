@@ -230,7 +230,7 @@ const MainContent = () => {
         window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt as any);
 
         const handleAppInstalled = () => {
-            console.log('[HAANG POS PWA] App installed successfully');
+            console.log('[LITTLE TONY APP PWA] App installed successfully');
             setShowInstallBanner(false);
             setDeferredPrompt(null);
         };
@@ -249,7 +249,7 @@ const MainContent = () => {
         if (!deferredPrompt) return;
         deferredPrompt.prompt();
         const { outcome } = await deferredPrompt.userChoice;
-        console.log(`[HAANG POS PWA] User prompt decision: ${outcome}`);
+        console.log(`[LITTLE TONY APP PWA] User prompt decision: ${outcome}`);
         setShowInstallBanner(false);
         setDeferredPrompt(null);
     };
@@ -416,7 +416,7 @@ const MainContent = () => {
                     </div>
                     <div className="flex-1 min-w-0">
                         <h4 className="text-sm font-bold text-gray-900 leading-tight">
-                            {language === 'km' ? 'ដំឡើងកម្មវិធី HAANG POS' : 'Install HAANG POS App'}
+                            {language === 'km' ? 'ដំឡើងកម្មវិធី Little Tony APP' : 'Install Little Tony APP'}
                         </h4>
                         <p className="text-xs text-gray-500 mt-1 leading-snug">
                             {language === 'km' 

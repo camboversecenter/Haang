@@ -318,7 +318,7 @@ export default function ReceiptView({ sale, receiptId, onBack }: { sale?: Sale, 
             
             {/* Print Footer specific */}
             <div className="hidden print:block text-center text-[10px] mt-4 font-bold">
-                POWERED BY HAANG POS
+                POWERED BY LITTLE TONY APP
             </div>
         </div>
     </div>

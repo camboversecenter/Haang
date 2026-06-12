@@ -51,8 +51,8 @@ export default defineConfig({
         ],
       },
       manifest: {
-        name: 'HAANG POS - Smart Cloud POS',
-        short_name: 'HAANG POS',
+        name: 'Little Tony APP',
+        short_name: 'Little Tony APP',
         description: 'Full-featured Smart Cloud POS & Table Self-Ordering platform for beautiful local retail and restaurants in Cambodia.',
         theme_color: '#4f46e5',
         background_color: '#f8fafc',
