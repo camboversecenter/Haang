@@ -676,7 +676,9 @@ export default function Inventory() {
                                             <input 
                                                 type="number" step="100"
                                                 className="w-full pl-8 pr-4 py-3.5 rounded-xl bg-gray-50 border border-gray-200 focus:bg-white focus:ring-2 focus:ring-brand-500 outline-none transition-all font-bold text-lg text-brand-700"
-                                                value={form.price}
+                                                value={form.price === 0 ? '' : form.price}
+                                                placeholder="0"
+                                                onFocus={e => e.target.select()}
                                                 onChange={e => setForm({...form, price: parseFloat(e.target.value) || 0})}
                                             />
                                         </div>
@@ -700,7 +702,9 @@ export default function Inventory() {
                                             <input 
                                                 type="number"
                                                 className="w-full p-3.5 rounded-xl bg-gray-50 border border-gray-200 focus:bg-white focus:ring-2 focus:ring-brand-500 outline-none transition-all font-medium text-lg"
-                                                value={form.stock}
+                                                value={form.stock === 0 ? '' : form.stock}
+                                                placeholder="0"
+                                                onFocus={e => e.target.select()}
                                                 onChange={e => setForm({...form, stock: parseInt(e.target.value) || 0})}
                                             />
                                         ) : (
@@ -783,16 +787,20 @@ export default function Inventory() {
                                                             <input 
                                                                 type="number" step="100"
                                                                 className="w-20 p-2 border border-gray-200 rounded-lg bg-gray-50 text-center font-bold"
-                                                                value={variant.price}
-                                                                onChange={(e) => updateVariant(vIdx, 'price', parseFloat(e.target.value))}
+                                                                value={variant.price === 0 ? '' : variant.price}
+                                                                placeholder="0"
+                                                                onFocus={e => e.target.select()}
+                                                                onChange={(e) => updateVariant(vIdx, 'price', parseFloat(e.target.value) || 0)}
                                                             />
                                                         </td>
                                                         <td className="py-2.5">
                                                             <input 
                                                                 type="number"
                                                                 className="w-16 p-2 border border-gray-200 rounded-lg bg-gray-50 text-center"
-                                                                value={variant.stock}
-                                                                onChange={(e) => updateVariant(vIdx, 'stock', parseInt(e.target.value))}
+                                                                value={variant.stock === 0 ? '' : variant.stock}
+                                                                placeholder="0"
+                                                                onFocus={e => e.target.select()}
+                                                                onChange={(e) => updateVariant(vIdx, 'stock', parseInt(e.target.value) || 0)}
                                                             />
                                                         </td>
                                                     </tr>
