@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { useStore } from '../store/StoreContext';
-import { Lock, User, Delete, LogOut, Plus, KeyRound } from 'lucide-react';
+import { Lock, User, Delete, LogOut, Plus, KeyRound, Shield, ShieldAlert, CheckCircle2, ArrowLeft } from 'lucide-react';
 import { Logo } from './Logo';
 
 export const LockScreen = ({ children }: { children?: React.ReactNode }) => {
@@ -119,30 +119,98 @@ export const LockScreen = ({ children }: { children?: React.ReactNode }) => {
   // Dynamic texts for PIN setup/upgrade on the lock screen
   let stepTitle = "";
   let stepSubtitle = "";
+  let badgeText = "";
+  const hasNoOldPin = !selectedStaff || !selectedStaff.pin || selectedStaff.pin.length === 0;
 
   if (step === 'verify_old') {
     if (language === 'km') {
+      badgeText = "តម្លើងប្រព័ន្ធសុវត្ថិភាព";
       stepTitle = "ផ្ទៀងផ្ទាត់លេខកូដចាស់";
-      stepSubtitle = `សូមវាយបញ្ចូលលេខកូដចាស់ (${selectedStaff?.pin?.length || 4} ខ្ទង់) ដើម្បីបន្ត`;
+      stepSubtitle = `សូមវាយបញ្ចូលលេខកូដចាស់ (${selectedStaff?.pin?.length || 4} ខ្ទង់) ដើម្បីបន្តទៅកាន់ប្រព័ន្ធថ្មី`;
+    } else if (language === 'zh') {
+      badgeText = "安全升级";
+      stepTitle = "验证旧密码";
+      stepSubtitle = `请输入您的旧密码 (${selectedStaff?.pin?.length || 4} 位) 以升级到 6 位密码`;
+    } else if (language === 'ja') {
+      badgeText = "セキュリティ同期";
+      stepTitle = "古いパスコードの確認";
+      stepSubtitle = `セキュリティアップグレードを続行するには、古いパスコード（${selectedStaff?.pin?.length || 4}桁）を入力してください`;
+    } else if (language === 'ko') {
+      badgeText = "보안 업그레이드";
+      stepTitle = "기존 비밀번호 확인";
+      stepSubtitle = `6자리 비밀번호로 업그레이드하려면 기존 비밀번호(${selectedStaff?.pin?.length || 4}자리)를 입력하세요`;
     } else {
+      badgeText = "Security Upgrade";
       stepTitle = "Verify Old PIN";
-      stepSubtitle = `Enter your old PIN (${selectedStaff?.pin?.length || 4} digits) to continue`;
+      stepSubtitle = `Enter your old PIN (${selectedStaff?.pin?.length || 4} digits) to proceed to the secure 6-digit system`;
     }
   } else if (step === 'set_new_1') {
-    if (language === 'km') {
-      stepTitle = "កំណត់លេខកូដថ្មី ៦ខ្ទង់";
-      stepSubtitle = "សូមវាយបញ្ចូលលេខកូដ PIN ថ្មីចំនួន ៦ ខ្ទង់ ដើម្បីសុវត្ថិភាពខ្ពស់";
+    if (hasNoOldPin) {
+      if (language === 'km') {
+        badgeText = "ដំឡើងលេខកូដដំបូង";
+        stepTitle = "បង្កើតលេខកូដសុវត្ថិភាព ៦ខ្ទង់";
+        stepSubtitle = "សូមកំណត់លេខកូដ PIN ថ្មីចំនួន ៦ ខ្ទង់ ដើម្បីការពារគណនីរបស់អ្នក";
+      } else if (language === 'zh') {
+        badgeText = "设置新密码";
+        stepTitle = "创建 6 位安全密码";
+        stepSubtitle = "请为您的账户设置一个安全的 6 位数 PIN 码";
+      } else if (language === 'ja') {
+        badgeText = "パスコードの設定";
+        stepTitle = "6桁の暗証番号を作成";
+        stepSubtitle = "アカウントを保護するために、新しい6桁のPINコードを設定してください";
+      } else if (language === 'ko') {
+        badgeText = "비밀번호 설정";
+        stepTitle = "6자리 보안 비밀번호 생성";
+        stepSubtitle = "계정을 보호하기 위해 새로운 6자리 PIN 코드를 설정해 주세요";
+      } else {
+        badgeText = "First-Time Security Setup";
+        stepTitle = "Create 6-Digit Passcode";
+        stepSubtitle = "Choose a secure 6-digit passcode for your staff account";
+      }
     } else {
-      stepTitle = "Set New 6-Digit PIN";
-      stepSubtitle = "Setup a more secure 6-digit passcode for your account";
+      if (language === 'km') {
+        badgeText = "តម្លើងប្រព័ន្ធសុវត្ថិភាព";
+        stepTitle = "កំណត់លេខកូដថ្មី ៦ខ្ទង់";
+        stepSubtitle = "សូមវាយបញ្ចូលលេខកូដ PIN ថ្មីចំនួន ៦ ខ្ទង់ ដើម្បីសុវត្ថិភាពខ្ពស់";
+      } else if (language === 'zh') {
+        badgeText = "安全升级";
+        stepTitle = "设置新 6 位 PIN 码";
+        stepSubtitle = "请输入新 6 位数 PIN 码以提高账户安全性";
+      } else if (language === 'ja') {
+        badgeText = "セキュリティアップグレード";
+        stepTitle = "新しい6桁のPIN設定";
+        stepSubtitle = "アカウントのセキュリティ向上のため、新しい6桁のPINコードを設定してください";
+      } else if (language === 'ko') {
+        badgeText = "보안 업그레이드";
+        stepTitle = "새로운 6자리 PIN 설정";
+        stepSubtitle = "계정 보안 강화를 위해 새로운 6자리 PIN 코드를 입력해 주세요";
+      } else {
+        badgeText = "Security Upgrade";
+        stepTitle = "Set New 6-Digit PIN";
+        stepSubtitle = "Upgrade to a secure 6-digit passcode for your account";
+      }
     }
   } else if (step === 'set_new_2') {
     if (language === 'km') {
+      badgeText = hasNoOldPin ? "ដំឡើងលេខកូដដំបូង" : "តម្លើងប្រព័ន្ធសុវត្ថិភាព";
       stepTitle = "បញ្ជាក់លេខកូដថ្មី";
-      stepSubtitle = "សូមវាយបញ្ចូលលេខកូដ PIN ថ្មី ៦ ខ្ទង់ ម្តងទៀតដើម្បីផ្ទៀងផ្ទាត់";
+      stepSubtitle = "សូមវាយបញ្ចូលលេខកូដ PIN ថ្មី ៦ ខ្ទង់ ម្តងទៀត ដើម្បីធានាថាត្រឹមត្រូវ";
+    } else if (language === 'zh') {
+      badgeText = hasNoOldPin ? "设置新密码" : "安全升级";
+      stepTitle = "确认新密码";
+      stepSubtitle = "请再次输入您的新 6 位 PIN 码以确认";
+    } else if (language === 'ja') {
+      badgeText = hasNoOldPin ? "パスコードの設定" : "セキュリティアップグレード";
+      stepTitle = "新しい暗証番号の確認";
+      stepSubtitle = "確認のため、もう一度新しい6桁 of PINコードを入力してください";
+    } else if (language === 'ko') {
+      badgeText = hasNoOldPin ? "비밀번호 설정" : "보안 업그레이드";
+      stepTitle = "새로운 비밀번호 확인";
+      stepSubtitle = "확인을 위해 새로운 6자리 PIN 코드를 한번 더 입력해 주세요";
     } else {
+      badgeText = hasNoOldPin ? "First-Time Security Setup" : "Security Upgrade";
       stepTitle = "Confirm New PIN";
-      stepSubtitle = "Re-enter your new 6-digit passcode to confirm";
+      stepSubtitle = "Re-enter your custom 6-digit passcode to confirm and activate";
     }
   }
 
@@ -199,6 +267,16 @@ export const LockScreen = ({ children }: { children?: React.ReactNode }) => {
                                       <span className="font-bold text-sm truncate w-full text-center">{staff.name}</span>
                                       <span className="text-[10px] bg-slate-900 px-2 py-0.5 rounded text-slate-400 uppercase">{staff.role}</span>
                                       
+                                      {(!staff.pin || staff.pin.length === 0) ? (
+                                          <span className="text-[9px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded-full animate-pulse">
+                                              {t('lock.setup_badge')}
+                                          </span>
+                                      ) : staff.pin.length !== 6 ? (
+                                          <span className="text-[9px] font-bold bg-brand-500/20 text-brand-300 border border-brand-500/30 px-2 py-0.5 rounded-full">
+                                              {t('lock.upgrade_badge')}
+                                          </span>
+                                      ) : null}
+                                      
                                       {/* New User Hint - Solves the "Forgot Pin on Day 1" problem */}
                                       {isDefaultOwner && (
                                         <div className="absolute -top-2 -right-2 bg-blue-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-lg animate-bounce z-10 border border-blue-400">
@@ -231,7 +309,16 @@ export const LockScreen = ({ children }: { children?: React.ReactNode }) => {
                   <div className="flex items-center gap-3 mb-6 bg-slate-800 px-4 py-2 rounded-full border border-slate-700 relative group">
                       <User size={16} className="text-brand-400" />
                       <span className="font-bold">{selectedStaff.name}</span>
-                      <button onClick={() => setSelectedStaffId(null)} className="ml-2 text-xs text-slate-400 hover:text-white underline">{t('lock.change')}</button>
+                      <button 
+                        onClick={() => {
+                            setSelectedStaffId(null);
+                            setStep('login');
+                            setPin('');
+                        }} 
+                        className="ml-2 text-xs text-slate-400 hover:text-white underline group-hover:text-brand-300 transition-colors"
+                      >
+                        {step === 'login' ? t('lock.change') : (language === 'km' ? 'បោះបង់' : 'Cancel')}
+                      </button>
                       
                       {/* Hint for demo/default users */}
                       {step === 'login' && (isDemo || (selectedStaff.name === 'Owner' && (selectedStaff.pin === '123456' || selectedStaff.pin === '1234'))) && (
@@ -242,15 +329,33 @@ export const LockScreen = ({ children }: { children?: React.ReactNode }) => {
                   </div>
 
                   {step !== 'login' && (
-                      <div className="text-center mb-6 px-4">
-                          <h4 className="text-md font-bold text-brand-300">{stepTitle}</h4>
-                          <p className="text-xs text-slate-400 mt-1">{stepSubtitle}</p>
+                      <div className="w-full bg-slate-800/60 border border-slate-700/80 rounded-2xl p-5 mb-6 text-center shadow-2xl relative overflow-hidden flex flex-col items-center">
+                          <div className="absolute top-0 right-0 w-24 h-24 bg-brand-500/5 rounded-full blur-xl pointer-events-none"></div>
+                          
+                          <div className="w-12 h-12 rounded-full bg-brand-500/10 border border-brand-500/20 flex items-center justify-center text-brand-400 mb-2.5 animate-pulse">
+                              <Shield size={24} />
+                          </div>
+
+                          <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-brand-500/20 text-brand-300 border border-brand-500/30 uppercase tracking-wider mb-2">
+                              <span>{badgeText}</span>
+                          </div>
+
+                          <h4 className="text-base font-bold text-slate-100">{stepTitle}</h4>
+                          <p className="text-xs text-slate-400 mt-1 max-w-[280px] leading-relaxed">{stepSubtitle}</p>
+
+                          {/* Interactive Step Dots for Setup Process */}
+                          {(step === 'set_new_1' || step === 'set_new_2') && (
+                              <div className="flex items-center gap-1.5 mt-3">
+                                  <span className={`w-1.5 h-1.5 rounded-full transition-all ${step === 'set_new_1' ? 'bg-brand-400 scale-125' : 'bg-brand-500/30'}`}></span>
+                                  <span className={`w-1.5 h-1.5 rounded-full transition-all ${step === 'set_new_2' ? 'bg-brand-400 scale-125' : 'bg-slate-600'}`}></span>
+                              </div>
+                          )}
                       </div>
                   )}
 
                   <div className="mb-8 flex gap-4">
                       {Array.from({ length: step === 'verify_old' ? (selectedStaff.pin?.length || 4) : 6 }).map((_, i) => (
-                          <div key={i} className={`w-4 h-4 rounded-full transition-all ${pin.length > i ? 'bg-brand-500 shadow-[0_0_10px_rgba(99,102,241,0.5)]' : 'bg-slate-700'} ${error ? 'bg-red-500 animate-shake' : ''}`}></div>
+                          <div key={i} className={`w-4.5 h-4.5 rounded-full transition-all duration-150 ${pin.length > i ? 'bg-brand-400 scale-110 shadow-[0_0_12px_rgba(99,102,241,0.7)]' : 'bg-slate-700'} ${error ? 'bg-red-500 animate-shake' : ''}`}></div>
                       ))}
                   </div>
 
