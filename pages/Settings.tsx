@@ -188,7 +188,7 @@ export default function Settings() {
           showToast(t('toast.fill_name_pin'), "error");
           return;
       }
-      if (staffForm.pin.length < 4) {
+      if (staffForm.pin.length !== 6) {
           showToast(t('toast.pin_len'), "error");
           return;
       }
@@ -589,7 +589,7 @@ export default function Settings() {
                    <h3 className="text-lg font-bold text-gray-800 mb-4">{editingStaff ? t('set.edit_staff') : t('set.add_staff')}</h3>
                    <div className="space-y-3">
                        <input className="w-full p-3 bg-gray-50 border border-gray-100 rounded-xl text-sm" placeholder={t('set.role_name')} value={staffForm.name} onChange={e => setStaffForm({...staffForm, name: e.target.value})} />
-                       <input className="w-full p-3 bg-gray-50 border border-gray-100 rounded-xl text-sm font-mono" placeholder={t('set.role_pin')} type="number" maxLength={4} value={staffForm.pin} onChange={e => setStaffForm({...staffForm, pin: e.target.value})} />
+                       <input className="w-full p-3 bg-gray-50 border border-gray-100 rounded-xl text-sm font-mono" placeholder={t('set.role_pin')} type="number" maxLength={6} value={staffForm.pin} onChange={e => setStaffForm({...staffForm, pin: e.target.value.slice(0, 6)})} />
                        <div><label className="text-xs font-bold text-gray-500 uppercase ml-1 mb-1 block">{t('set.role_select')}</label><select className="w-full p-3 bg-gray-50 border border-gray-100 rounded-xl text-sm" value={staffForm.role} onChange={e => setStaffForm({...staffForm, role: e.target.value as any})}><option value="cashier">{t('set.role_cashier')}</option><option value="waiter">{t('set.role_waiter')}</option><option value="manager">{t('set.role_manager')}</option><option value="admin">{t('set.role_admin')}</option><option value="kitchen">{t('set.role_kitchen')}</option></select></div>
                    </div>
                    <div className="flex gap-2 mt-6"><button onClick={() => setShowStaffModal(false)} className="flex-1 py-3 text-gray-500 font-bold bg-gray-100 rounded-xl">{t('common.cancel')}</button><button onClick={handleSaveStaff} className="flex-1 py-3 text-white font-bold bg-brand-600 rounded-xl">{t('common.save')}</button></div>

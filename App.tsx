@@ -2,6 +2,8 @@
 import React, { useState, useEffect } from 'react';
 import { StoreProvider, useStore } from './store/StoreContext';
 import { UIProvider } from './store/UIContext';
+import { VaultProvider } from './zk-vault';
+import { supabaseVaultAdapter } from './services/supabaseVaultAdapter';
 import POS from './pages/POS';
 import Inventory from './pages/Inventory';
 import Dashboard from './pages/Dashboard';
@@ -448,7 +450,9 @@ function App() {
   return (
     <StoreProvider>
       <UIProvider>
-        <MainContent />
+        <VaultProvider storageAdapter={supabaseVaultAdapter}>
+          <MainContent />
+        </VaultProvider>
       </UIProvider>
     </StoreProvider>
   );

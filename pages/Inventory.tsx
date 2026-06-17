@@ -676,10 +676,13 @@ export default function Inventory() {
                                             <input 
                                                 type="number" step="100"
                                                 className="w-full pl-8 pr-4 py-3.5 rounded-xl bg-gray-50 border border-gray-200 focus:bg-white focus:ring-2 focus:ring-brand-500 outline-none transition-all font-bold text-lg text-brand-700"
-                                                value={form.price === 0 ? '' : form.price}
+                                                value={form.price !== undefined && form.price !== null ? form.price : ''}
                                                 placeholder="0"
                                                 onFocus={e => e.target.select()}
-                                                onChange={e => setForm({...form, price: parseFloat(e.target.value) || 0})}
+                                                onChange={e => {
+                                                    const val = e.target.value;
+                                                    setForm({...form, price: val === '' ? 0 : parseFloat(val) || 0});
+                                                }}
                                             />
                                         </div>
                                     </div>
@@ -702,10 +705,13 @@ export default function Inventory() {
                                             <input 
                                                 type="number"
                                                 className="w-full p-3.5 rounded-xl bg-gray-50 border border-gray-200 focus:bg-white focus:ring-2 focus:ring-brand-500 outline-none transition-all font-medium text-lg"
-                                                value={form.stock === 0 ? '' : form.stock}
+                                                value={form.stock !== undefined && form.stock !== null ? form.stock : ''}
                                                 placeholder="0"
                                                 onFocus={e => e.target.select()}
-                                                onChange={e => setForm({...form, stock: parseInt(e.target.value) || 0})}
+                                                onChange={e => {
+                                                    const val = e.target.value;
+                                                    setForm({...form, stock: val === '' ? 0 : parseInt(val) || 0});
+                                                }}
                                             />
                                         ) : (
                                             <div className="flex bg-gray-50 rounded-xl p-1 border border-gray-200 h-[52px]">

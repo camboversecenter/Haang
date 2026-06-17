@@ -66,7 +66,7 @@ export default function ShopSetup() {
           await createShop(name, type, logoUrl, enableMultiRoles);
           
           if (enableMultiRoles) {
-              showToast(language === 'km' ? "ហាងត្រូវបានបង្កើត! លេខសម្ងាត់គឺ 1234" : "Shop created! Default PIN: 1234", "success");
+              showToast(language === 'km' ? "ហាងត្រូវបានបង្កើត! លេខសម្ងាត់គឺ 123456" : "Shop created! Default PIN: 123456", "success");
           } else {
               showToast(language === 'km' ? "ហាងត្រូវបានបង្កើតជោគជ័យ!" : "Shop created successfully!", "success");
           }

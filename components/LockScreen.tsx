@@ -5,23 +5,80 @@ import { Lock, User, Delete, LogOut, Plus, KeyRound } from 'lucide-react';
 import { Logo } from './Logo';
 
 export const LockScreen = ({ children }: { children?: React.ReactNode }) => {
-  const { staffList, switchStaff, signOut, currentShop, user, t, addStaff } = useStore();
+  const { staffList, switchStaff, signOut, currentShop, user, t, addStaff, updateStaff, language } = useStore();
   const [selectedStaffId, setSelectedStaffId] = useState<string | null>(null);
   const [pin, setPin] = useState('');
   const [error, setError] = useState(false);
 
-  const handleNumClick = (num: string) => {
-    if (pin.length < 4) {
-      const newPin = pin + num;
-      setPin(newPin);
-      setError(false);
-      
-      // Auto submit on 4th digit
-      if (newPin.length === 4) {
-        const success = switchStaff(newPin, selectedStaffId || undefined);
-        if (!success) {
-          setError(true);
-          setTimeout(() => setPin(''), 300);
+  // States for 6-digit passcode upgrade migration
+  const [step, setStep] = useState<'login' | 'verify_old' | 'set_new_1' | 'set_new_2'>('login');
+  const [newPin, setNewPin] = useState('');
+
+  const handleNumClick = async (num: string) => {
+    setError(false);
+    const staff = staffList.find(s => s.id === selectedStaffId);
+    if (!staff) return;
+
+    if (step === 'login') {
+      if (pin.length < 6) {
+        const newPinVal = pin + num;
+        setPin(newPinVal);
+        if (newPinVal.length === 6) {
+          const success = switchStaff(newPinVal, staff.id);
+          if (!success) {
+            setError(true);
+            setTimeout(() => setPin(''), 300);
+          }
+        }
+      }
+    } else if (step === 'verify_old') {
+      const expectedLen = staff.pin ? staff.pin.length : 0;
+      if (pin.length < expectedLen) {
+        const entered = pin + num;
+        setPin(entered);
+        if (entered.length === expectedLen) {
+          if (entered === staff.pin) {
+            // Correct old pin! Proceed to set new 6-digit PIN
+            setStep('set_new_1');
+            setPin('');
+          } else {
+            setError(true);
+            setTimeout(() => setPin(''), 300);
+          }
+        }
+      }
+    } else if (step === 'set_new_1') {
+      if (pin.length < 6) {
+        const entered = pin + num;
+        setPin(entered);
+        if (entered.length === 6) {
+          setNewPin(entered);
+          setStep('set_new_2');
+          setPin('');
+        }
+      }
+    } else if (step === 'set_new_2') {
+      if (pin.length < 6) {
+        const entered = pin + num;
+        setPin(entered);
+        if (entered.length === 6) {
+          if (entered === newPin) {
+            // Passcode Match! Let's save to Database
+            await updateStaff(staff.id, { pin: entered });
+            // Switch to the newly upgraded staff
+            switchStaff(entered, staff.id);
+            // Reset state
+            setSelectedStaffId(null);
+            setStep('login');
+            setPin('');
+          } else {
+            // Mismatch -> shake, clear and reset to step 1
+            setError(true);
+            setTimeout(() => {
+              setStep('set_new_1');
+              setPin('');
+            }, 500);
+          }
         }
       }
     }
@@ -35,16 +92,59 @@ export const LockScreen = ({ children }: { children?: React.ReactNode }) => {
       setSelectedStaffId(id);
       setPin('');
       setError(false);
+      
+      const staff = staffList.find(s => s.id === id);
+      if (staff) {
+          if (!staff.pin || staff.pin.length === 0) {
+              setStep('set_new_1');
+          } else if (staff.pin.length !== 6) {
+              setStep('verify_old');
+          } else {
+              setStep('login');
+          }
+      } else {
+          setStep('login');
+      }
   };
 
   const handleCreateDefaultAdmin = async () => {
-      // Use "1234" as default PIN for recovery
-      await addStaff({ name: 'Owner', pin: '1234', role: 'admin' });
+      // Use "123456" as default PIN for recovery
+      await addStaff({ name: 'Owner', pin: '123456', role: 'admin' });
       // Reload will happen automatically via StoreContext update
   };
 
   const selectedStaff = staffList.find(s => s.id === selectedStaffId);
   const isDemo = user?.id === 'demo-user-id';
+
+  // Dynamic texts for PIN setup/upgrade on the lock screen
+  let stepTitle = "";
+  let stepSubtitle = "";
+
+  if (step === 'verify_old') {
+    if (language === 'km') {
+      stepTitle = "ផ្ទៀងផ្ទាត់លេខកូដចាស់";
+      stepSubtitle = `សូមវាយបញ្ចូលលេខកូដចាស់ (${selectedStaff?.pin?.length || 4} ខ្ទង់) ដើម្បីបន្ត`;
+    } else {
+      stepTitle = "Verify Old PIN";
+      stepSubtitle = `Enter your old PIN (${selectedStaff?.pin?.length || 4} digits) to continue`;
+    }
+  } else if (step === 'set_new_1') {
+    if (language === 'km') {
+      stepTitle = "កំណត់លេខកូដថ្មី ៦ខ្ទង់";
+      stepSubtitle = "សូមវាយបញ្ចូលលេខកូដ PIN ថ្មីចំនួន ៦ ខ្ទង់ ដើម្បីសុវត្ថិភាពខ្ពស់";
+    } else {
+      stepTitle = "Set New 6-Digit PIN";
+      stepSubtitle = "Setup a more secure 6-digit passcode for your account";
+    }
+  } else if (step === 'set_new_2') {
+    if (language === 'km') {
+      stepTitle = "បញ្ជាក់លេខកូដថ្មី";
+      stepSubtitle = "សូមវាយបញ្ចូលលេខកូដ PIN ថ្មី ៦ ខ្ទង់ ម្តងទៀតដើម្បីផ្ទៀងផ្ទាត់";
+    } else {
+      stepTitle = "Confirm New PIN";
+      stepSubtitle = "Re-enter your new 6-digit passcode to confirm";
+    }
+  }
 
   return (
     <div className="fixed inset-0 z-[100] bg-slate-900 text-white flex flex-col items-center justify-center p-4">
@@ -85,7 +185,7 @@ export const LockScreen = ({ children }: { children?: React.ReactNode }) => {
                       <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 w-full px-4">
                           {staffList.map(staff => {
                               // Check if this is the default admin to show a hint
-                              const isDefaultOwner = staff.name === 'Owner' && staff.pin === '1234';
+                              const isDefaultOwner = staff.name === 'Owner' && (staff.pin === '123456' || staff.pin === '1234');
                               
                               return (
                                   <button
@@ -102,7 +202,7 @@ export const LockScreen = ({ children }: { children?: React.ReactNode }) => {
                                       {/* New User Hint - Solves the "Forgot Pin on Day 1" problem */}
                                       {isDefaultOwner && (
                                         <div className="absolute -top-2 -right-2 bg-blue-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-lg animate-bounce z-10 border border-blue-400">
-                                            PIN: 1234
+                                            PIN: {staff.pin}
                                         </div>
                                       )}
 
@@ -128,21 +228,28 @@ export const LockScreen = ({ children }: { children?: React.ReactNode }) => {
           ) : (
               // PIN Entry Pad
               <div className="flex-1 flex flex-col items-center animate-[scale-in_0.2s_ease-out]">
-                  <div className="flex items-center gap-3 mb-8 bg-slate-800 px-4 py-2 rounded-full border border-slate-700 relative group">
+                  <div className="flex items-center gap-3 mb-6 bg-slate-800 px-4 py-2 rounded-full border border-slate-700 relative group">
                       <User size={16} className="text-brand-400" />
                       <span className="font-bold">{selectedStaff.name}</span>
                       <button onClick={() => setSelectedStaffId(null)} className="ml-2 text-xs text-slate-400 hover:text-white underline">{t('lock.change')}</button>
                       
                       {/* Hint for demo/default users */}
-                      {(isDemo || (selectedStaff.name === 'Owner' && selectedStaff.pin === '1234')) && (
+                      {step === 'login' && (isDemo || (selectedStaff.name === 'Owner' && (selectedStaff.pin === '123456' || selectedStaff.pin === '1234'))) && (
                           <div className="absolute top-full mt-3 left-1/2 -translate-x-1/2 bg-slate-700 text-slate-300 text-[10px] px-3 py-1 rounded-full whitespace-nowrap border border-slate-600">
                               Try PIN: {selectedStaff.pin}
                           </div>
                       )}
                   </div>
 
+                  {step !== 'login' && (
+                      <div className="text-center mb-6 px-4">
+                          <h4 className="text-md font-bold text-brand-300">{stepTitle}</h4>
+                          <p className="text-xs text-slate-400 mt-1">{stepSubtitle}</p>
+                      </div>
+                  )}
+
                   <div className="mb-8 flex gap-4">
-                      {[0, 1, 2, 3].map(i => (
+                      {Array.from({ length: step === 'verify_old' ? (selectedStaff.pin?.length || 4) : 6 }).map((_, i) => (
                           <div key={i} className={`w-4 h-4 rounded-full transition-all ${pin.length > i ? 'bg-brand-500 shadow-[0_0_10px_rgba(99,102,241,0.5)]' : 'bg-slate-700'} ${error ? 'bg-red-500 animate-shake' : ''}`}></div>
                       ))}
                   </div>
