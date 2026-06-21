@@ -154,10 +154,74 @@ export const analyzePaymentProof = async (imageFile: File): Promise<{amount: num
   }
 };
 
+// Helper to extract base64 from different possible response shapes
+const extractBase64 = (data: any): { base64: string } | null => {
+  if (!data) return null;
+  if (typeof data === 'string') {
+    const cleanStr = data.trim();
+    if (cleanStr.startsWith('data:image')) {
+      const base64 = cleanStr.split(',')[1];
+      return { base64 };
+    }
+    // Check if it's a URL or base64 structure
+    if (cleanStr.startsWith('http://') || cleanStr.startsWith('https://')) {
+      console.warn("Received URL instead of Base64 data from Edge Function:", cleanStr);
+      return null;
+    }
+    return { base64: cleanStr };
+  }
+  if (data.base64) {
+    return { base64: data.base64 };
+  }
+  if (data.image) {
+    const cleanImg = data.image.trim();
+    if (cleanImg.startsWith('data:image')) {
+      const base64 = cleanImg.split(',')[1];
+      return { base64 };
+    }
+    return { base64: data.image };
+  }
+  return null;
+};
+
+/**
+ * Invokes the 'gen-image' Edge Function securely with robust fallbacks.
+ */
+const invokeImageGen = async (prompt: string): Promise<{ base64: string } | null> => {
+  try {
+    console.log("Invoking direct 'gen-image' Edge Function with prompt:", prompt);
+    const { data, error } = await supabase.functions.invoke('gen-image', {
+      body: { prompt }
+    });
+
+    if (error) {
+      console.warn("Direct 'gen-image' invocation with { prompt } body failed, trying { action, payload } nested structure...", error);
+      const fallbackRes = await supabase.functions.invoke('gen-image', {
+        body: { action: 'generate-image', payload: { prompt } }
+      });
+      if (fallbackRes.error) {
+        throw new Error(fallbackRes.error.message || "Failed to invoke 'gen-image' Edge Function");
+      }
+      return extractBase64(fallbackRes.data);
+    }
+
+    return extractBase64(data);
+  } catch (e) {
+    console.error("Failed to invoke 'gen-image' Edge Function, falling back to legacy 'gemini-api':", e);
+    const res = await supabase.functions.invoke('gemini-api', {
+      body: { action: 'generate-image', payload: { prompt } }
+    });
+    if (!res.error) {
+      return extractBase64(res.data);
+    }
+    throw e;
+  }
+};
+
 export const generateLogo = async (shopName: string): Promise<File | null> => {
   try {
     const prompt = `A modern, minimalist, and professional logo design for a business named "${shopName}". Vector art style, clean lines, white background.`;
-    const result = await invokeGemini('generate-image', { prompt });
+    const result = await invokeImageGen(prompt);
     
     if (result && result.base64) {
       const filename = `logo-${Date.now()}.png`;
@@ -173,7 +237,7 @@ export const generateLogo = async (shopName: string): Promise<File | null> => {
 export const generateProductImage = async (productName: string): Promise<File | null> => {
   try {
     const prompt = `Professional product photography of "${productName}". Clean white background, studio lighting, high resolution.`;
-    const result = await invokeGemini('generate-image', { prompt });
+    const result = await invokeImageGen(prompt);
 
     if (result && result.base64) {
       const filename = `product-${Date.now()}.png`;
