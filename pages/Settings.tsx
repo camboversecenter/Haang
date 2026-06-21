@@ -5,9 +5,10 @@ import { Save, Settings as SettingsIcon, Coins, Percent, RefreshCw, Globe, Calen
 import { uploadProductImage, deleteFile } from '../services/storageService';
 import { generateLogo } from '../services/geminiService';
 import { Staff, StaffRole, DiscountRule, DiscountType, PaymentMethod } from '../types';
+import VaultSettings from '../components/zk-vault/VaultSettings';
 
 export default function Settings() {
-  const { settings, updateSettings, updateShop, currentShop, t, language, signOut, staffList, addStaff, updateStaff, deleteStaff, discountRules, addDiscountRule, deleteDiscountRule, categories, products, setLanguage, paymentMethods, addPaymentMethod, updatePaymentMethod, deletePaymentMethod, connectPrinter, printerConnected } = useStore();
+  const { settings, updateSettings, updateShop, currentShop, t, language, signOut, staffList, addStaff, updateStaff, deleteStaff, discountRules, addDiscountRule, deleteDiscountRule, categories, products, setLanguage, paymentMethods, addPaymentMethod, updatePaymentMethod, deletePaymentMethod, connectPrinter, printerConnected, user } = useStore();
   const { showToast, showAlert, showConfirm } = useUI();
   
   const [activeTab, setActiveTab] = useState<'general' | 'staff' | 'discounts' | 'payments' | 'hardware'>('general');
@@ -543,6 +544,20 @@ export default function Settings() {
                    </div>
                    {paymentMethods.length === 0 && (<div className="text-center py-10 text-gray-400 bg-white rounded-2xl border border-dashed border-gray-200"><CreditCard size={32} className="mx-auto mb-2 opacity-30" /><p className="text-sm">No payment methods yet.</p></div>)}
                    {paymentMethods.map(pm => (<div key={pm.id} className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex items-center justify-between"><div className="flex items-center gap-4">{pm.qrCodeUrl && (<div className="w-12 h-12 bg-gray-50 rounded-lg overflow-hidden border border-gray-200"><img src={pm.qrCodeUrl} alt="QR" className="w-full h-full object-cover" /></div>)}<div><p className="font-bold text-gray-800">{pm.name}</p><p className="text-xs text-gray-500">{pm.accountName} {pm.accountNumber ? `• ${pm.accountNumber}` : ''}</p></div></div><div className="flex gap-1 items-center"><button onClick={() => handleOpenPaymentModal(pm)} className="p-2 text-gray-400 hover:text-brand-600 hover:bg-brand-50 rounded-lg"><Edit2 size={16} /></button><button onClick={() => updatePaymentMethod(pm.id, { active: !pm.active })} className={`text-[10px] font-bold px-2 py-1 rounded transition-colors ${pm.active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>{pm.active ? 'Active' : 'Inactive'}</button><button onClick={() => deletePaymentMethod(pm.id)} className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg"><Trash2 size={16} /></button></div></div>))}
+               </div>
+           )}
+
+           {activeTab === 'hardware' && (
+               <div className="space-y-6">
+                   {user && (
+                       <div className="bg-white rounded-2xl shadow-card p-6 border-l-4 border-indigo-500 animate-[scale-in_0.2s_ease-out] mb-6">
+                           <h3 className="font-bold text-gray-800 text-sm mb-4">Secure Passkey Vault (zk-vault)</h3>
+                           <p className="text-xs text-gray-400 mb-4 leading-relaxed font-sans">
+                               Manage your device biometrics, hardware security keys (FaceID / TouchID) and recovery passcode.
+                           </p>
+                           <VaultSettings userId={user.id} userEmail={user.email || ''} />
+                       </div>
+                   )}
                </div>
            )}
 

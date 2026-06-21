@@ -2,8 +2,10 @@
 import React, { useState, useEffect } from 'react';
 import { StoreProvider, useStore } from './store/StoreContext';
 import { UIProvider } from './store/UIContext';
-import { VaultProvider } from './zk-vault';
+import { VaultProvider, useZkVault, VaultStatus } from './zk-vault';
 import { supabaseVaultAdapter } from './services/supabaseVaultAdapter';
+import VaultSetup from './components/zk-vault/VaultSetup';
+import VaultUnlock from './components/zk-vault/VaultUnlock';
 import POS from './pages/POS';
 import Inventory from './pages/Inventory';
 import Dashboard from './pages/Dashboard';
@@ -24,7 +26,7 @@ import { Logo } from './components/Logo';
 
 // --- Top Bar Component (Mobile) ---
 const TopBar = () => {
-    const { language, setLanguage, currentShop, activeStaff, logoutStaff, settings } = useStore();
+    const { language, setLanguage, currentShop, activeStaff, logoutStaff, settings, signOut, user } = useStore();
     
     // Role Badge Colors
     const getRoleBadgeStyle = (role: string) => {
@@ -65,6 +67,15 @@ const TopBar = () => {
                     <Globe size={14} className="text-brand-600" />
                     <span className="text-xs font-bold text-gray-700">{language === 'en' ? 'KM' : 'EN'}</span>
                 </button>
+                {user && (
+                    <button 
+                        onClick={signOut}
+                        className="flex items-center justify-center p-2 text-gray-500 hover:text-red-500 hover:bg-red-50 rounded-full transition-colors border border-gray-100 bg-gray-50 w-8 h-8"
+                        title={language === 'km' ? 'ចាកចេញពីហាង' : 'Sign Out'}
+                    >
+                        <LogOut size={14} />
+                    </button>
+                )}
             </div>
         </header>
     );
@@ -72,7 +83,7 @@ const TopBar = () => {
 
 // --- Navigation Component ---
 const Navigation = ({ currentTab, setTab }: { currentTab: string, setTab: (t: string) => void }) => {
-  const { language, setLanguage, t, logoutStaff, currentShop, settings, activeStaff, user } = useStore();
+  const { language, setLanguage, t, logoutStaff, currentShop, settings, activeStaff, user, signOut } = useStore();
 
   const isRestaurant = currentShop?.type === 'restaurant';
   
@@ -172,12 +183,22 @@ const Navigation = ({ currentTab, setTab }: { currentTab: string, setTab: (t: st
                 </div>
             )}
 
+            {user && settings.enableMultiRoles && (
+                <button 
+                    onClick={logoutStaff}
+                    className="w-full flex items-center gap-3 px-4 py-3 text-gray-500 hover:bg-brand-50 hover:text-brand-600 rounded-2xl transition-colors font-medium text-sm"
+                >
+                    <Lock size={20} />
+                    <span>{language === 'km' ? 'ចាក់សោអេក្រង់' : 'Lock Screen'}</span>
+                </button>
+            )}
+
             <button 
-                onClick={logoutStaff}
+                onClick={signOut}
                 className="w-full flex items-center gap-3 px-4 py-3 text-gray-500 hover:bg-red-50 hover:text-red-600 rounded-2xl transition-colors font-medium text-sm"
             >
-                {user && settings.enableMultiRoles ? <Lock size={20} /> : <LogOut size={20} />}
-                <span>{user && settings.enableMultiRoles ? 'Lock Screen' : 'Logout'}</span>
+                <LogOut size={20} />
+                <span>{user?.id === 'demo-user-id' ? (language === 'km' ? 'ចាកចេញពី Demo' : 'Exit Demo') : (language === 'km' ? 'ចាកចេញពីហាង' : 'Sign Out')}</span>
             </button>
 
             <div className="bg-gradient-to-br from-gray-50 to-gray-100 rounded-2xl p-4 border border-gray-100">
@@ -205,9 +226,34 @@ const Navigation = ({ currentTab, setTab }: { currentTab: string, setTab: (t: st
 
 const MainContent = () => {
     const [activeTab, setActiveTab] = useState('pos');
-    const { currentShop, user, loadingAuth, activeStaff, settings, staffList, switchStaff, language } = useStore();
+    const { currentShop, user, loadingAuth, activeStaff, settings, staffList, switchStaff, language, signOut } = useStore();
     const [viewMode, setViewMode] = useState<'app' | 'receipt' | 'store' | 'license' | 'manual'>('app');
     const [receiptId, setReceiptId] = useState<string | null>(null);
+
+    // --- Secure Passkey Vault State ---
+    const { isUnlocked, checkVaultStatus } = useZkVault();
+    const [vaultStatus, setVaultStatus] = useState<VaultStatus | null>(null);
+    const [checkingVault, setCheckingVault] = useState(false);
+
+    useEffect(() => {
+        if (user) {
+            setCheckingVault(true);
+            checkVaultStatus(user.id)
+                .then((s) => {
+                    setVaultStatus(s);
+                    setCheckingVault(false);
+                })
+                .catch((err) => {
+                    console.error("Vault status check failed:", err);
+                    setCheckingVault(false);
+                });
+        } else {
+            setVaultStatus(null);
+        }
+    }, [user, checkVaultStatus]);
+
+    const userNeedsVaultSetup = user && vaultStatus && !vaultStatus.exists;
+    const userNeedsVaultUnlock = user && vaultStatus && vaultStatus.exists && !isUnlocked;
 
     // --- PWA LOGIC & CONNECTION TRACKING ---
     const [isOffline, setIsOffline] = useState(!navigator.onLine);
@@ -339,7 +385,7 @@ const MainContent = () => {
     // 5. Admin Views (Protected)
     
     // Auth Loading
-    if (loadingAuth) {
+    if (loadingAuth || (user && !vaultStatus && checkingVault)) {
         return (
             <div className="h-[100dvh] w-full flex items-center justify-center bg-slate-50">
                 <Loader2 className="animate-spin text-brand-600" size={48} />
@@ -357,6 +403,58 @@ const MainContent = () => {
     // Condition 2: Owner Logged in but No Shop Set Up
     if (user && !currentShop) {
         return <ShopSetup />;
+    }
+
+    // Secure Passkey Vault checks
+    if (user && currentShop) {
+        if (userNeedsVaultSetup) {
+            return (
+                <div className="min-h-screen w-full bg-slate-900 flex flex-col items-center justify-center p-4">
+                    <div className="w-full max-w-md">
+                        <div className="flex justify-center mb-6 animate-pulse">
+                            <Logo className="w-12 h-12" textClassName="text-2xl text-white" />
+                        </div>
+                        <VaultSetup 
+                            userId={user.id} 
+                            userEmail={user.email || ''} 
+                            onSuccess={() => checkVaultStatus(user.id).then(setVaultStatus)} 
+                        />
+                        <div className="text-center mt-6">
+                            <button 
+                                onClick={signOut} 
+                                className="text-sm font-semibold text-slate-400 hover:text-white underline transition-all"
+                            >
+                                {language === 'km' ? 'ចាកចេញពីគណនី' : 'Cancel & Sign Out'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        if (userNeedsVaultUnlock) {
+            return (
+                <div className="min-h-screen w-full bg-slate-900 flex flex-col items-center justify-center p-4">
+                    <div className="w-full max-w-md">
+                        <div className="flex justify-center mb-6">
+                            <Logo className="w-12 h-12" textClassName="text-2xl text-white" />
+                        </div>
+                        <VaultUnlock 
+                            userId={user.id} 
+                            onSuccess={() => checkVaultStatus(user.id).then(setVaultStatus)} 
+                        />
+                        <div className="text-center mt-6">
+                            <button 
+                                onClick={signOut} 
+                                className="text-sm font-semibold text-slate-400 hover:text-white underline transition-all"
+                            >
+                                {language === 'km' ? 'ចាកចេញពីគណនី' : 'Cancel & Sign Out'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
     }
 
     // Condition 3: Shared Device Lock (Owner logged in, but no active operator selected)
