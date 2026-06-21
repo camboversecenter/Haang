@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, ReactNode, useMemo } from 'react';
 import { supabase, setSupabaseStaffHeaders } from '../services/supabaseClient';
 import { DB_CONSTANTS } from '../services/supabaseSchema';
 import { printer } from '../services/printerService';
@@ -439,6 +439,7 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       if(product.category) dbProduct.category = product.category;
       if(product.attributes) dbProduct.attributes = product.attributes;
       if(product.variants) dbProduct.variants = product.variants;
+      if(product.trackStock !== undefined) dbProduct.track_stock = product.trackStock;
       
       await supabase.from(DB_CONSTANTS.TABLE_PRODUCTS).update(dbProduct).eq('id', product.id);
       setProducts(prev => prev.map(p => p.id === product.id ? { ...p, ...product } : p));
@@ -446,8 +447,36 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const getProductActivities = (pid: string) => [];
   const fetchMoreActivities = async (pid: string) => {};
   const hasMoreActivities = (pid: string) => false;
-  const renameCategory = async (oldName: string, newName: string) => {};
-  const deleteCategory = async (name: string) => {};
+  
+  const renameCategory = async (oldName: string, newName: string) => {
+      if (!currentShop) return;
+      try {
+          const { error } = await supabase.from(DB_CONSTANTS.TABLE_PRODUCTS)
+              .update({ category: newName })
+              .eq('shop_id', currentShop.id)
+              .eq('category', oldName);
+          if (error) throw error;
+          
+          setProducts(prev => prev.map(p => p.category === oldName ? { ...p, category: newName } : p));
+      } catch (err) {
+          console.error("Failed to rename category:", err);
+      }
+  };
+  
+  const deleteCategory = async (name: string) => {
+      if (!currentShop) return;
+      try {
+          const { error } = await supabase.from(DB_CONSTANTS.TABLE_PRODUCTS)
+              .update({ category: 'General' })
+              .eq('shop_id', currentShop.id)
+              .eq('category', name);
+          if (error) throw error;
+
+          setProducts(prev => prev.map(p => p.category === name ? { ...p, category: 'General' } : p));
+      } catch (err) {
+          console.error("Failed to delete category:", err);
+      }
+  };
 
   const addToCart = (product: Product, variant?: any) => {
       setCart(prev => {
@@ -536,6 +565,51 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
           total, subtotal: total, tax: 0, paymentMethod: method, orderStatus: 'completed',
           items: cart, currency: settings.currency, exchangeRate: settings.exchangeRate, customerId
       };
+
+      // Decrement product stock inside local state and database
+      const updatedProducts = products.map(p => {
+          const cartItemsForProduct = cart.filter(item => item.id === p.id);
+          if (cartItemsForProduct.length === 0) return p;
+          if (p.trackStock === false) return p;
+
+          let newStock = p.stock || 0;
+          let newVariants = p.variants ? [...p.variants] : undefined;
+
+          cartItemsForProduct.forEach(item => {
+              if (item.variantId && newVariants) {
+                  newVariants = newVariants.map(v => {
+                      if (v.id === item.variantId) {
+                          return { ...v, stock: Math.max(0, (v.stock || 0) - item.quantity) };
+                      }
+                      return v;
+                  });
+                  newStock = newVariants.reduce((sum, v) => sum + (v.stock || 0), 0);
+              } else {
+                  newStock = Math.max(0, newStock - item.quantity);
+              }
+          });
+
+          return {
+              ...p,
+              stock: newStock,
+              variants: newVariants
+          };
+      });
+
+      setProducts(updatedProducts);
+
+      // Persist stock changes to Supabase
+      Promise.all(updatedProducts.map(async (p) => {
+          const originalProduct = products.find(op => op.id === p.id);
+          if (!originalProduct) return;
+          if (originalProduct.stock !== p.stock || JSON.stringify(originalProduct.variants) !== JSON.stringify(p.variants)) {
+              await supabase.from(DB_CONSTANTS.TABLE_PRODUCTS).update({
+                  stock: p.stock,
+                  variants: p.variants
+              }).eq('id', p.id);
+          }
+      })).catch(e => console.error("Error updating stocks in DB on checkout", e));
+
       setSales(prev => [sale, ...prev]);
       clearCart();
       supabase.from(DB_CONSTANTS.TABLE_SALES).insert({
@@ -547,6 +621,49 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   };
 
   const addManualSale = async (sale: Sale) => {
+      // Decrement product stock inside local state and database for manual sales addition too
+      const updatedProducts = products.map(p => {
+          const cartItemsForProduct = sale.items.filter(item => item.id === p.id);
+          if (cartItemsForProduct.length === 0) return p;
+          if (p.trackStock === false) return p;
+
+          let newStock = p.stock || 0;
+          let newVariants = p.variants ? [...p.variants] : undefined;
+
+          cartItemsForProduct.forEach(item => {
+              if (item.variantId && newVariants) {
+                  newVariants = newVariants.map(v => {
+                      if (v.id === item.variantId) {
+                          return { ...v, stock: Math.max(0, (v.stock || 0) - item.quantity) };
+                      }
+                      return v;
+                  });
+                  newStock = newVariants.reduce((sum, v) => sum + (v.stock || 0), 0);
+              } else {
+                  newStock = Math.max(0, newStock - item.quantity);
+              }
+          });
+
+          return {
+              ...p,
+              stock: newStock,
+              variants: newVariants
+          };
+      });
+
+      setProducts(updatedProducts);
+
+      Promise.all(updatedProducts.map(async (p) => {
+          const originalProduct = products.find(op => op.id === p.id);
+          if (!originalProduct) return;
+          if (originalProduct.stock !== p.stock || JSON.stringify(originalProduct.variants) !== JSON.stringify(p.variants)) {
+              await supabase.from(DB_CONSTANTS.TABLE_PRODUCTS).update({
+                  stock: p.stock,
+                  variants: p.variants
+              }).eq('id', p.id);
+          }
+      })).catch(e => console.error("Error updating stocks in DB on addManualSale", e));
+
       setSales(prev => [sale, ...prev]);
       await supabase.from(DB_CONSTANTS.TABLE_SALES).insert({
           id: sale.id, shop_id: sale.shopId, timestamp: sale.timestamp, total: sale.total,
@@ -604,7 +721,66 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const fetchMoreSales = async () => {};
   const hasMoreSales = false;
   const verifyOrder = async (id: string) => {};
-  const cancelSale = async (id: string) => {};
+  
+  const cancelSale = async (id: string) => {
+      try {
+          const saleToCancel = sales.find(s => s.id === id);
+          if (!saleToCancel) return;
+
+          const { error } = await supabase.from(DB_CONSTANTS.TABLE_SALES).update({ order_status: 'cancelled' }).eq('id', id);
+          if (error) throw error;
+
+          setSales(prev => prev.map(s => s.id === id ? { ...s, orderStatus: 'cancelled' } : s));
+
+          // If voiding/cancelling a previously valid order, restore product stock
+          if (saleToCancel.orderStatus === 'completed' || saleToCancel.orderStatus === 'confirmed') {
+              const updatedProducts = products.map(p => {
+                  const itemsForProduct = saleToCancel.items.filter(item => item.id === p.id);
+                  if (itemsForProduct.length === 0) return p;
+                  if (p.trackStock === false) return p;
+
+                  let newStock = p.stock || 0;
+                  let newVariants = p.variants ? [...p.variants] : undefined;
+
+                  itemsForProduct.forEach(item => {
+                      if (item.variantId && newVariants) {
+                          newVariants = newVariants.map(v => {
+                              if (v.id === item.variantId) {
+                                  return { ...v, stock: (v.stock || 0) + item.quantity };
+                              }
+                              return v;
+                          });
+                          newStock = newVariants.reduce((sum, v) => sum + (v.stock || 0), 0);
+                      } else {
+                          newStock = newStock + item.quantity;
+                      }
+                  });
+
+                  return {
+                      ...p,
+                      stock: newStock,
+                      variants: newVariants
+                  };
+              });
+
+              setProducts(updatedProducts);
+
+              for (const p of updatedProducts) {
+                  const originalProduct = products.find(op => op.id === p.id);
+                  if (!originalProduct) continue;
+                  if (originalProduct.stock !== p.stock || JSON.stringify(originalProduct.variants) !== JSON.stringify(p.variants)) {
+                      await supabase.from(DB_CONSTANTS.TABLE_PRODUCTS).update({
+                          stock: p.stock,
+                          variants: p.variants
+                      }).eq('id', p.id);
+                  }
+              }
+          }
+      } catch (err) {
+          console.error("Failed to cancel sale:", err);
+      }
+  };
+  
   const refreshSales = async () => {};
   const exportSalesData = async () => {};
   const addExpense = async (e: any) => {};
@@ -678,13 +854,24 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const updateOrderItemStatus = async (sid: string, iid: string, st: OrderItemStatus) => {};
   const removeItemFromOrder = async (sid: string, iid: string) => {};
 
+  const categories = useMemo(() => {
+      const catsSet = new Set<string>();
+      catsSet.add('General');
+      products.forEach(p => {
+          if (p.category) {
+              catsSet.add(p.category);
+          }
+      });
+      return Array.from(catsSet).sort();
+  }, [products]);
+
   return (
     <StoreContext.Provider value={{
       user, loadingAuth, currentShop, settings, language, setLanguage, t,
       createShop, updateShop, updateSettings,
       signInWithGoogle, signInAsDemoUser, signOut,
       staffList, activeStaff, loginAsStaff, switchStaff, logoutStaff, addStaff, updateStaff, deleteStaff,
-      products, categories: ['General'], addProduct, updateProduct, getProductActivities, fetchMoreActivities, hasMoreActivities, renameCategory, deleteCategory,
+      products, categories, addProduct, updateProduct, getProductActivities, fetchMoreActivities, hasMoreActivities, renameCategory, deleteCategory,
       cart, addToCart, removeFromCart, updateCartQuantity, clearCart, checkout, addManualSale, getBestDiscountForItem,
       sales, fetchMoreSales, hasMoreSales, verifyOrder, cancelSale, refreshSales, exportSalesData,
       customers, addCustomer, updateCustomer, repayDebt, findOrCreateCustomer,
