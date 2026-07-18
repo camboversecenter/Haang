@@ -20,8 +20,8 @@ export default function CommunityLicense() {
                         </p>
                     </div>
                     <div className="bg-white/10 backdrop-blur-md px-4 py-2 rounded-xl border border-white/20">
-                         <p className="text-xs font-bold text-brand-200 uppercase tracking-wider">Phase / ស្ថានភាព</p>
-                         <p className="font-bold text-white">Development & Pre-Token</p>
+                         <p className="text-xs font-bold text-brand-200 uppercase tracking-wider">License / អាជ្ញាប័ណ្ណ</p>
+                         <p className="font-bold text-white">Open Source · Apache 2.0</p>
                     </div>
                 </div>
             </div>
@@ -34,10 +34,10 @@ export default function CommunityLicense() {
                     </h2>
                     <div className="pl-10 space-y-2">
                         <p className="leading-relaxed font-display">
-                            កម្មវិធីនេះអនុញ្ញាតឱ្យប្រើប្រាស់ដោយ <span className="text-green-600 font-bold">ឥតគិតថ្លៃ (Free to Use)</span>។ ដើម្បីផ្គត់ផ្គង់ការចំណាយលើប្រតិបត្តិការ និងការអភិវឌ្ឍ ក្រុមហ៊ុន E-KHMER Technology Co., Ltd. ស្វាគមន៍រាល់ការបរិច្ចាគ (Donations) និងរក្សាសិទ្ធិក្នុងការរកប្រាក់ចំណូលតាមរយៈការផ្សព្វផ្សាយពាណិជ្ជកម្ម (Ads) ឬសេវាកម្មផ្សេងៗ។
+                            កម្មវិធីនេះអនុញ្ញាតឱ្យប្រើប្រាស់ដោយ <span className="text-green-600 font-bold">ឥតគិតថ្លៃ (Free to Use)</span> សម្រាប់សហគ្រាសធុនតូច និងមធ្យម (SME) នៅកម្ពុជា។ ដើម្បីផ្គត់ផ្គង់ការចំណាយលើប្រតិបត្តិការ និងការអភិវឌ្ឍ គម្រោងនេះទទួលបានការគាំទ្រតាមរយៈការបរិច្ចាគ (Donations), ជំនួយឧបត្ថម្ភ (Grants), ការបណ្តុះបណ្តាល (Training) និងសេវាកម្មគាំទ្រ (Support)។
                         </p>
                         <p className="text-sm text-gray-500 italic">
-                            (Users may use this platform for free. To cover development and operating costs, E-KHMER Technology Co., Ltd. welcomes donations and reserves the right to monetize via advertisements or other services.)
+                            (This app is free to use for SMEs in Cambodia. To cover operating and development costs, the project is sustained through community donations, grants, training, and support services — not by selling the software.)
                         </p>
                     </div>
                 </section>
@@ -45,14 +45,14 @@ export default function CommunityLicense() {
                 <section>
                      <h2 className="text-xl font-bold text-brand-900 mb-4 font-display flex items-center gap-2">
                         <span className="w-8 h-8 bg-brand-100 rounded-full flex items-center justify-center text-brand-600 text-sm font-sans">2</span>
-                        កម្មសិទ្ធិបច្ចុប្បន្ន (Current Ownership)
+                        កូដបើកចំហ & អាជ្ញាប័ណ្ណ (Open Source & License)
                     </h2>
                     <div className="pl-10 space-y-2">
                         <p className="leading-relaxed font-display">
-                            បច្ចុប្បន្ននេះ កម្មវិធីនិងកូដ (Source Code) ត្រូវបានអភិវឌ្ឍនិងថែរក្សាដោយក្រុមហ៊ុន E-KHMER Technology Co., Ltd.។ ដើម្បីធានាសុវត្ថិភាពមុនពេលលក់ Token កូដត្រូវបានរក្សាទុកជាឯកជន (Closed Source)។ ហាមដាច់ខាតការចម្លង ឬបំបែកកូដ (Reverse Engineering) ដោយគ្មានការអនុញ្ញាត។
+                            កូដប្រភព (Source Code) ត្រូវបានចេញផ្សាយជាសាធារណៈ (Open Source) ក្រោមអាជ្ញាប័ណ្ណ <span className="font-bold">Apache License 2.0</span>។ អ្នករាល់គ្នាមានសិទ្ធិប្រើប្រាស់ ចម្លង កែប្រែ និងចែកចាយកូដ ដោយគ្រាន់តែរក្សាការជូនដំណឹងអំពីកម្មសិទ្ធិ (Copyright Notice) ប៉ុណ្ណោះ។
                         </p>
                         <p className="text-sm text-gray-500 italic">
-                            (Currently, the source code is proprietary and maintained by E-KHMER Technology Co., Ltd. for security purposes. Reverse engineering or unauthorized copying is strictly prohibited.)
+                            (The source code is released as open source under the Apache License 2.0. Anyone is free to use, copy, modify, and distribute it — including commercially — provided they keep the copyright and attribution notices.)
                         </p>
                     </div>
                 </section>
@@ -60,14 +60,14 @@ export default function CommunityLicense() {
                 <section>
                      <h2 className="text-xl font-bold text-brand-900 mb-4 font-display flex items-center gap-2">
                         <span className="w-8 h-8 bg-brand-100 rounded-full flex items-center justify-center text-brand-600 text-sm font-sans">3</span>
-                        ការសន្យាអនាគត & Token Sale (Future Transition)
+                        ឈ្មោះ និងម៉ាកសញ្ញា (Brand & Trademark)
                     </h2>
                     <div className="pl-10 space-y-2">
                         <p className="leading-relaxed font-display">
-                            នេះជាកិច្ចសន្យារបស់យើង៖ នៅពេលការលក់ Token (Token Sale) បានបញ្ចប់ជាស្ថាពរ ក្រុមហ៊ុននឹងដាក់ឱ្យប្រើប្រាស់កូដជាសាធារណៈ (Open Source) ក្រោមអាជ្ញាប័ណ្ណ Apache License 2.0។ នៅពេលនោះ ការសម្រេចចិត្តនឹងត្រូវធ្វើឡើងតាមរយៈសហគមន៍ (Community Decision/DAO)។
+                            កូដគឺបើកចំហ ប៉ុន្តែឈ្មោះ និងឡូហ្គោ "Haang" / "Little Tony" ត្រូវបានរក្សាសិទ្ធិជាម៉ាកសញ្ញា។ ការចម្លងកូដ (Fork) ត្រូវប្រើឈ្មោះ និងម៉ាកសញ្ញាផ្ទាល់ខ្លួន ដើម្បីកុំឱ្យមានការភាន់ច្រឡំជាមួយគម្រោងផ្លូវការ។
                         </p>
                         <p className="text-sm text-gray-500 italic">
-                            (We pledge to release the source code under the Apache License 2.0 upon completion of the Token Sale. Governance rights will then transfer to the Community.)
+                            (The code is open, but the "Haang" / "Little Tony" name and logo are reserved trademarks and are not granted by the Apache 2.0 license. Forks must use their own distinct name and branding to avoid confusion with the official project.)
                         </p>
                     </div>
                 </section>
@@ -79,10 +79,10 @@ export default function CommunityLicense() {
                     </h2>
                     <div className="pl-10 space-y-2">
                         <p className="leading-relaxed font-display">
-                            កម្មវិធីនេះត្រូវបានផ្តល់ជូន "ដូចដែលបានមាន" (AS IS) ដោយគ្មានការធានាណាមួយឡើយ។ ក្រុមហ៊ុន E-KHMER Technology Co., Ltd. មិនទទួលខុសត្រូវចំពោះការបាត់បង់ទិន្នន័យ ឬទ្រព្យសម្បត្តិណាមួយដែលកើតឡើងពីការប្រើប្រាស់កម្មវិធីនេះឡើយ។ អ្នកប្រើប្រាស់ត្រូវទទួលខុសត្រូវដោយខ្លួនឯង។
+                            កម្មវិធីនេះត្រូវបានផ្តល់ជូន "ដូចដែលបានមាន" (AS IS) ដោយគ្មានការធានាណាមួយឡើយ។ គម្រោង Haang (Little Tony) មិនទទួលខុសត្រូវចំពោះការបាត់បង់ទិន្នន័យ ឬទ្រព្យសម្បត្តិណាមួយដែលកើតឡើងពីការប្រើប្រាស់កម្មវិធីនេះឡើយ។ អ្នកប្រើប្រាស់ត្រូវទទួលខុសត្រូវដោយខ្លួនឯង។
                         </p>
                         <p className="text-sm text-gray-500 italic">
-                            (The software is provided "AS IS" without warranty of any kind. E-KHMER Technology Co., Ltd. is not liable for any damages or losses arising from the use of this platform. Users assume full responsibility.)
+                            (The software is provided "AS IS" without warranty of any kind, consistent with the Apache License 2.0. The Haang (Little Tony) project is not liable for any damages or losses arising from the use of this platform. Users assume full responsibility.)
                         </p>
                     </div>
                 </section>

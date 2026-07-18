@@ -95,3 +95,15 @@ npm run build     # production build
 npm run preview   # preview the build locally
 npm run deploy    # deploy to Cloudflare Pages
 ```
+
+---
+
+## 🤝 Community & License
+
+Haang is a **free, community-driven** project for Cambodian SMEs. It is sustained through community **support, donations, grants, and training** — not by selling the software.
+
+- **License:** [Apache License 2.0](./LICENSE) — free to use, modify, and distribute, including commercially. See [`NOTICE`](./NOTICE).
+- **Trademark:** the code is open source, but the **"Haang" / "Little Tony" name and logo are reserved**. See [`TRADEMARK.md`](./TRADEMARK.md).
+- **Contributing:** contributions are welcome under the DCO sign-off model — see [`CONTRIBUTING.md`](./CONTRIBUTING.md).
+
+Copyright © 2026 Little Tony.
