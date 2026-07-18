@@ -9,7 +9,7 @@ import { Sale, TableMessage, Table, OrderItemStatus } from '../types';
 import { supabase } from '../services/supabaseClient';
 
 export default function Tables() {
-  const { tables, bookings, addTable, updateTable, addBooking, settings, updateSettings, t, language, currentShop, sales, formatPrice, updateOrderItemStatus, removeItemFromOrder, confirmOrderItems, finishTableOrder, startTableSession } = useStore();
+  const { tables, bookings, addTable, updateTable, addBooking, settings, updateSettings, t, language, currentShop, sales, formatPrice, updateOrderItemStatus, removeItemFromOrder, confirmOrderItems, finishTableOrder, startTableSession, refreshSales } = useStore();
   const { showToast, showConfirm } = useUI();
   
   const [activeTab, setActiveTab] = useState<'layout' | 'schedule'>('layout');
@@ -48,6 +48,33 @@ export default function Tables() {
       const interval = setInterval(() => setCurrentTime(Date.now()), 60000);
       return () => clearInterval(interval);
   }, []);
+
+  // Keep sales fresh so orders placed via table QR appear for staff in real time.
+  useEffect(() => {
+      if (!currentShop) return;
+      refreshSales();
+
+      const channel = supabase
+        .channel('staff_table_sales')
+        .on('postgres_changes', {
+            event: '*',
+            schema: 'public',
+            table: 'sales',
+            filter: `shop_id=eq.${currentShop.id}`
+        }, () => {
+            refreshSales();
+        })
+        .subscribe();
+
+      return () => { supabase.removeChannel(channel); };
+  }, [currentShop]);
+
+  // Reflect refreshed sales in the currently open table order modal.
+  useEffect(() => {
+      if (!viewingTableId) return;
+      const activeOrder = sales.find(s => s.tableId === viewingTableId && s.orderStatus !== 'completed' && s.orderStatus !== 'cancelled');
+      setSelectedTableOrder(activeOrder || null);
+  }, [sales, viewingTableId]);
 
   useEffect(() => {
       if (!currentShop) return;

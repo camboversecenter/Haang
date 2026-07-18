@@ -145,12 +145,20 @@ export default function ReceiptView({ sale, receiptId, onBack }: { sale?: Sale, 
   // Gross subtotal (before discount)
   const grossSubtotal = finalSubtotal + totalDiscount;
 
-  // Helper to format payment method
+  // Helper to format payment method into its correct category label.
   const getPaymentMethodLabel = (method?: string) => {
       if (!method) return 'UNKNOWN';
-      if (method === 'dity_card') return 'DiTy Card';
-      if (method === 'khqr') return 'KHQR';
-      return method.toUpperCase();
+      const labels: Record<string, string> = {
+          cash: language === 'km' ? 'សាច់ប្រាក់' : 'Cash',
+          khqr: 'KHQR',
+          dity_card: 'DiTy Card',
+          // "Jompeak" (ជំពាក់) = pay-later / owe. Must NOT be shown as generic "Credit".
+          credit: language === 'km' ? 'ជំពាក់' : 'Credit (Jompeak)',
+          online_pending: language === 'km' ? 'អនឡាញ' : 'Online',
+      };
+      if (labels[method]) return labels[method];
+      // Custom/bank methods: show the name cleanly instead of shouting it.
+      return method.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
   };
 
   const paymentLabel = getPaymentMethodLabel(displaySale.paymentMethod);

@@ -138,12 +138,27 @@ export default function POS() {
       }
   };
 
+  // Resolve a scanned value to a product. Supports both raw barcodes AND the
+  // app's own product QR codes, which encode a URL containing "?productId=<id>".
+  const findScannedProduct = (raw: string): Product | undefined => {
+      const code = raw.trim();
+      if (code.includes('productId=')) {
+          const idMatch = code.match(/productId=([^&\s]+)/);
+          const pid = idMatch ? decodeURIComponent(idMatch[1]) : null;
+          if (pid) {
+              const byId = products.find(p => p.id === pid);
+              if (byId) return byId;
+          }
+      }
+      return products.find(p => p.barcode === code);
+  };
+
   const handleSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
-        const barcodeMatch = products.find(p => p.barcode === search || p.barcode === search.trim());
-        if (barcodeMatch) {
-             handleProductClick(barcodeMatch);
-            setSearch(''); 
+        const match = findScannedProduct(search);
+        if (match) {
+             handleProductClick(match);
+            setSearch('');
         }
     }
   };
@@ -155,7 +170,7 @@ export default function POS() {
           return;
       }
 
-      const product = products.find(p => p.barcode === code);
+      const product = findScannedProduct(code);
       if (product) {
           handleProductClick(product);
           // Update ref

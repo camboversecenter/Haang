@@ -781,10 +781,64 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       }
   };
   
-  const refreshSales = async () => {};
+  const mapSaleRow = (s: any): Sale => ({
+      id: s.id, shopId: s.shop_id, timestamp: s.timestamp, total: Number(s.total), subtotal: Number(s.subtotal),
+      tax: Number(s.tax), paymentMethod: s.payment_method, orderStatus: s.order_status,
+      items: typeof s.items === 'string' ? JSON.parse(s.items) : (s.items || []),
+      currency: s.currency, exchangeRate: Number(s.exchange_rate),
+      customerId: s.customer_id, tableId: s.table_id, paymentProofUrl: s.payment_proof_url, amountPaid: s.amount_paid
+  });
+
+  const refreshSales = async () => {
+      if (!currentShop) return;
+      const { data, error } = await supabase.from(DB_CONSTANTS.TABLE_SALES)
+          .select('*').eq('shop_id', currentShop.id)
+          .order('timestamp', { ascending: false }).limit(50);
+      if (!error && data) setSales(data.map(mapSaleRow));
+  };
   const exportSalesData = async () => {};
-  const addExpense = async (e: any) => {};
-  const getDashboardMetrics = async (s: number, e: number) => ({ revenue: 0, expenses: 0, transactions: 0, tax: 0, discount: 0, topProducts: [] });
+
+  const addExpense = async (expense: Partial<Expense>) => {
+      if (!currentShop) return;
+      const id = generateId();
+      await supabase.from(DB_CONSTANTS.TABLE_EXPENSES).insert({
+          id, shop_id: currentShop.id, amount: expense.amount, category: expense.category,
+          note: expense.note, date: expense.date
+      });
+  };
+
+  const getDashboardMetrics = async (start: number, end: number) => {
+      const empty = { revenue: 0, expenses: 0, transactions: 0, tax: 0, discount: 0, topProducts: [] as { name: string; sales: number }[] };
+      if (!currentShop) return empty;
+
+      const [salesRes, expRes] = await Promise.all([
+          supabase.from(DB_CONSTANTS.TABLE_SALES).select('*')
+              .eq('shop_id', currentShop.id).gte('timestamp', start).lte('timestamp', end),
+          supabase.from(DB_CONSTANTS.TABLE_EXPENSES).select('amount, date')
+              .eq('shop_id', currentShop.id).gte('date', start).lte('date', end)
+      ]);
+
+      const completed = (salesRes.data || []).filter((s: any) => s.order_status === 'completed');
+      let revenue = 0, tax = 0, discount = 0;
+      const productSales: Record<string, number> = {};
+
+      completed.forEach((s: any) => {
+          revenue += Number(s.total) || 0;
+          tax += Number(s.tax) || 0;
+          const items = typeof s.items === 'string' ? JSON.parse(s.items) : (s.items || []);
+          items.forEach((it: any) => {
+              discount += (it.appliedDiscount?.amountSaved || 0) * (it.quantity || 1);
+              if (it.name) productSales[it.name] = (productSales[it.name] || 0) + (it.quantity || 1);
+          });
+      });
+
+      const expenses = (expRes.data || []).reduce((sum: number, e: any) => sum + (Number(e.amount) || 0), 0);
+      const topProducts = Object.entries(productSales)
+          .sort((a, b) => b[1] - a[1]).slice(0, 5)
+          .map(([name, sales]) => ({ name, sales }));
+
+      return { revenue, expenses, transactions: completed.length, tax, discount, topProducts };
+  };
   
   const addDiscountRule = async (rule: Partial<DiscountRule>) => {
       if (!currentShop) return;
@@ -850,9 +904,46 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   
   const startTableSession = async (tid: string) => { updateTable(tid, { status: 'occupied', allowOrdering: true }); };
   const finishTableOrder = async (sid: string, tid: string) => { updateTable(tid, { status: 'available', allowOrdering: false }); };
-  const confirmOrderItems = async (sid: string) => {};
-  const updateOrderItemStatus = async (sid: string, iid: string, st: OrderItemStatus) => {};
-  const removeItemFromOrder = async (sid: string, iid: string) => {};
+  const confirmOrderItems = async (sid: string) => {
+      const sale = sales.find(s => s.id === sid);
+      if (!sale) return;
+      // Send all not-yet-confirmed items to the kitchen.
+      const updatedItems = sale.items.map(it =>
+          (!it.status || it.status === 'pending') ? { ...it, status: 'confirmed' as OrderItemStatus } : it
+      );
+      const { error } = await supabase.from(DB_CONSTANTS.TABLE_SALES)
+          .update({ items: updatedItems, order_status: 'confirmed' }).eq('id', sid);
+      if (!error) {
+          setSales(prev => prev.map(s => s.id === sid ? { ...s, items: updatedItems, orderStatus: 'confirmed' } : s));
+      }
+  };
+
+  const updateOrderItemStatus = async (sid: string, iid: string, st: OrderItemStatus) => {
+      const sale = sales.find(s => s.id === sid);
+      if (!sale) return;
+      const updatedItems = sale.items.map(it =>
+          it.orderItemId === iid ? { ...it, status: st, served: st === 'served' } : it
+      );
+      const { error } = await supabase.from(DB_CONSTANTS.TABLE_SALES)
+          .update({ items: updatedItems }).eq('id', sid);
+      if (!error) {
+          setSales(prev => prev.map(s => s.id === sid ? { ...s, items: updatedItems } : s));
+      }
+  };
+
+  const removeItemFromOrder = async (sid: string, iid: string) => {
+      const sale = sales.find(s => s.id === sid);
+      if (!sale) return;
+      const updatedItems = sale.items.filter(it => it.orderItemId !== iid);
+      const subtotal = updatedItems.reduce((acc, it) => acc + (it.price * it.quantity), 0);
+      const tax = subtotal * (settings.taxRate / 100);
+      const total = subtotal + tax;
+      const { error } = await supabase.from(DB_CONSTANTS.TABLE_SALES)
+          .update({ items: updatedItems, subtotal, tax, total }).eq('id', sid);
+      if (!error) {
+          setSales(prev => prev.map(s => s.id === sid ? { ...s, items: updatedItems, subtotal, tax, total } : s));
+      }
+  };
 
   const categories = useMemo(() => {
       const catsSet = new Set<string>();
