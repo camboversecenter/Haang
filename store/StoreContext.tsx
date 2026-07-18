@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect, ReactNode, useMe
 import { supabase, setSupabaseStaffHeaders } from '../services/supabaseClient';
 import { DB_CONSTANTS } from '../services/supabaseSchema';
 import { printer } from '../services/printerService';
+import { dbWrite, initSync, onQueueChange, getQueueLength } from '../services/syncQueue';
 import { 
   Shop, Product, CartItem, Sale, Customer, Staff, Settings, 
   Booking, Table, ProductActivity, DiscountRule, PaymentMethod, 
@@ -95,7 +96,9 @@ interface StoreContextType {
   printerConnected: boolean;
   connectPrinter: () => Promise<boolean>;
   printReceipt: (sale: Sale) => Promise<void>;
-  
+
+  pendingWrites: number;
+
   formatPrice: (amount: number) => string;
 }
 
@@ -223,6 +226,15 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const [discountRules, setDiscountRules] = useState<DiscountRule[]>([]);
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
   const [printerConnected, setPrinterConnected] = useState(false);
+  const [pendingWrites, setPendingWrites] = useState(0);
+
+  // Durable offline write queue: keep the pending count in sync and drain on reconnect.
+  useEffect(() => {
+    const off = onQueueChange(setPendingWrites);
+    setPendingWrites(getQueueLength());
+    initSync();
+    return off;
+  }, []);
 
   const generateId = () => `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
   const t = (key: string) => {
@@ -430,7 +442,7 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
           price: product.price, stock: product.stock, track_stock: product.trackStock, category: product.category,
           image_url: product.imageUrl, barcode: product.barcode, attributes: product.attributes, variants: product.variants
       };
-      await supabase.from(DB_CONSTANTS.TABLE_PRODUCTS).insert(dbProduct);
+      await dbWrite({ table: DB_CONSTANTS.TABLE_PRODUCTS, action: 'insert', payload: dbProduct });
       setProducts(prev => [...prev, { ...product, shopId: currentShop.id } as Product]);
   };
   const updateProduct = async (product: Partial<Product>) => {
@@ -445,7 +457,7 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       if(product.variants) dbProduct.variants = product.variants;
       if(product.trackStock !== undefined) dbProduct.track_stock = product.trackStock;
       
-      await supabase.from(DB_CONSTANTS.TABLE_PRODUCTS).update(dbProduct).eq('id', product.id);
+      await dbWrite({ table: DB_CONSTANTS.TABLE_PRODUCTS, action: 'update', payload: dbProduct, match: { id: product.id } });
       setProducts(prev => prev.map(p => p.id === product.id ? { ...p, ...product } : p));
   };
   const getProductActivities = (pid: string) => [];
@@ -602,25 +614,22 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
       setProducts(updatedProducts);
 
-      // Persist stock changes to Supabase
-      Promise.all(updatedProducts.map(async (p) => {
+      // Persist stock changes (offline-safe via the sync queue)
+      updatedProducts.forEach((p) => {
           const originalProduct = products.find(op => op.id === p.id);
           if (!originalProduct) return;
           if (originalProduct.stock !== p.stock || JSON.stringify(originalProduct.variants) !== JSON.stringify(p.variants)) {
-              await supabase.from(DB_CONSTANTS.TABLE_PRODUCTS).update({
-                  stock: p.stock,
-                  variants: p.variants
-              }).eq('id', p.id);
+              dbWrite({ table: DB_CONSTANTS.TABLE_PRODUCTS, action: 'update', payload: { stock: p.stock, variants: p.variants }, match: { id: p.id } });
           }
-      })).catch(e => console.error("Error updating stocks in DB on checkout", e));
+      });
 
       setSales(prev => [sale, ...prev]);
       clearCart();
-      supabase.from(DB_CONSTANTS.TABLE_SALES).insert({
+      dbWrite({ table: DB_CONSTANTS.TABLE_SALES, action: 'insert', payload: {
           id: sale.id, shop_id: sale.shopId, timestamp: sale.timestamp, total: sale.total,
           subtotal: sale.subtotal, tax: sale.tax, payment_method: sale.paymentMethod, order_status: sale.orderStatus,
           items: sale.items, currency: sale.currency, exchange_rate: sale.exchangeRate, customer_id: sale.customerId
-      }).then();
+      }});
       return sale;
   };
 
@@ -657,34 +666,31 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
       setProducts(updatedProducts);
 
-      Promise.all(updatedProducts.map(async (p) => {
+      updatedProducts.forEach((p) => {
           const originalProduct = products.find(op => op.id === p.id);
           if (!originalProduct) return;
           if (originalProduct.stock !== p.stock || JSON.stringify(originalProduct.variants) !== JSON.stringify(p.variants)) {
-              await supabase.from(DB_CONSTANTS.TABLE_PRODUCTS).update({
-                  stock: p.stock,
-                  variants: p.variants
-              }).eq('id', p.id);
+              dbWrite({ table: DB_CONSTANTS.TABLE_PRODUCTS, action: 'update', payload: { stock: p.stock, variants: p.variants }, match: { id: p.id } });
           }
-      })).catch(e => console.error("Error updating stocks in DB on addManualSale", e));
+      });
 
       setSales(prev => [sale, ...prev]);
-      await supabase.from(DB_CONSTANTS.TABLE_SALES).insert({
+      await dbWrite({ table: DB_CONSTANTS.TABLE_SALES, action: 'insert', payload: {
           id: sale.id, shop_id: sale.shopId, timestamp: sale.timestamp, total: sale.total,
           subtotal: sale.subtotal, tax: sale.tax, payment_method: sale.paymentMethod, order_status: sale.orderStatus,
           items: sale.items, currency: sale.currency, exchange_rate: sale.exchangeRate
-      });
+      }});
   };
 
   const addCustomer = async (name: string, phone?: string, email?: string) => {
       if (!currentShop) return '';
       const id = generateId();
-      await supabase.from(DB_CONSTANTS.TABLE_CUSTOMERS).insert({ id, shop_id: currentShop.id, name, phone, email });
+      await dbWrite({ table: DB_CONSTANTS.TABLE_CUSTOMERS, action: 'insert', payload: { id, shop_id: currentShop.id, name, phone, email } });
       setCustomers(prev => [...prev, { id, shopId: currentShop.id, name, phone, email, totalDebt: 0, lastInteraction: Date.now() }]);
       return id;
   };
   const updateCustomer = async (id: string, updates: Partial<Customer>) => {
-      await supabase.from(DB_CONSTANTS.TABLE_CUSTOMERS).update(updates).eq('id', id);
+      await dbWrite({ table: DB_CONSTANTS.TABLE_CUSTOMERS, action: 'update', payload: updates, match: { id } });
       setCustomers(prev => prev.map(c => c.id === id ? { ...c, ...updates } : c));
   };
   const repayDebt = async (cid: string, amount: number) => { };
@@ -693,17 +699,23 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const addTable = async (name: string, capacity: number) => {
       if (!currentShop) return;
       const id = generateId();
-      await supabase.from(DB_CONSTANTS.TABLE_TABLES).insert({ id, shop_id: currentShop.id, name, capacity, status: 'available' });
+      await dbWrite({ table: DB_CONSTANTS.TABLE_TABLES, action: 'insert', payload: { id, shop_id: currentShop.id, name, capacity, status: 'available', allow_ordering: false } });
       setTables(prev => [...prev, { id, shopId: currentShop.id, name, capacity, status: 'available', allowOrdering: false }]);
   };
   const updateTable = async (id: string, updates: Partial<Table>) => {
-      await supabase.from(DB_CONSTANTS.TABLE_TABLES).update({ ...updates, allow_ordering: updates.allowOrdering }).eq('id', id);
+      // Map only real DB columns (snake_case); a stray camelCase key makes PostgREST reject the write.
+      const payload: any = {};
+      if (updates.name !== undefined) payload.name = updates.name;
+      if (updates.capacity !== undefined) payload.capacity = updates.capacity;
+      if (updates.status !== undefined) payload.status = updates.status;
+      if (updates.allowOrdering !== undefined) payload.allow_ordering = updates.allowOrdering;
+      await dbWrite({ table: DB_CONSTANTS.TABLE_TABLES, action: 'update', payload, match: { id } });
       setTables(prev => prev.map(t => t.id === id ? { ...t, ...updates } : t));
   };
   const addBooking = async (booking: any) => {
       if (!currentShop) return;
       const id = generateId();
-      await supabase.from(DB_CONSTANTS.TABLE_BOOKINGS).insert({ id, shop_id: currentShop.id, customer_name: booking.customerName, phone: booking.phone, time: booking.time, guests: booking.guests, table_id: booking.tableId, notes: booking.notes });
+      await dbWrite({ table: DB_CONSTANTS.TABLE_BOOKINGS, action: 'insert', payload: { id, shop_id: currentShop.id, customer_name: booking.customerName, phone: booking.phone, time: booking.time, guests: booking.guests, table_id: booking.tableId, notes: booking.notes } });
       setBookings(prev => [...prev, { ...booking, id, shopId: currentShop.id }]);
   };
 
@@ -731,8 +743,7 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
           const saleToCancel = sales.find(s => s.id === id);
           if (!saleToCancel) return;
 
-          const { error } = await supabase.from(DB_CONSTANTS.TABLE_SALES).update({ order_status: 'cancelled' }).eq('id', id);
-          if (error) throw error;
+          await dbWrite({ table: DB_CONSTANTS.TABLE_SALES, action: 'update', payload: { order_status: 'cancelled' }, match: { id } });
 
           setSales(prev => prev.map(s => s.id === id ? { ...s, orderStatus: 'cancelled' } : s));
 
@@ -773,10 +784,7 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
                   const originalProduct = products.find(op => op.id === p.id);
                   if (!originalProduct) continue;
                   if (originalProduct.stock !== p.stock || JSON.stringify(originalProduct.variants) !== JSON.stringify(p.variants)) {
-                      await supabase.from(DB_CONSTANTS.TABLE_PRODUCTS).update({
-                          stock: p.stock,
-                          variants: p.variants
-                      }).eq('id', p.id);
+                      dbWrite({ table: DB_CONSTANTS.TABLE_PRODUCTS, action: 'update', payload: { stock: p.stock, variants: p.variants }, match: { id: p.id } });
                   }
               }
           }
@@ -805,10 +813,10 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const addExpense = async (expense: Partial<Expense>) => {
       if (!currentShop) return;
       const id = generateId();
-      await supabase.from(DB_CONSTANTS.TABLE_EXPENSES).insert({
+      await dbWrite({ table: DB_CONSTANTS.TABLE_EXPENSES, action: 'insert', payload: {
           id, shop_id: currentShop.id, amount: expense.amount, category: expense.category,
           note: expense.note, date: expense.date
-      });
+      }});
   };
 
   const getDashboardMetrics = async (start: number, end: number) => {
@@ -915,11 +923,8 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       const updatedItems = sale.items.map(it =>
           (!it.status || it.status === 'pending') ? { ...it, status: 'confirmed' as OrderItemStatus } : it
       );
-      const { error } = await supabase.from(DB_CONSTANTS.TABLE_SALES)
-          .update({ items: updatedItems, order_status: 'confirmed' }).eq('id', sid);
-      if (!error) {
-          setSales(prev => prev.map(s => s.id === sid ? { ...s, items: updatedItems, orderStatus: 'confirmed' } : s));
-      }
+      setSales(prev => prev.map(s => s.id === sid ? { ...s, items: updatedItems, orderStatus: 'confirmed' } : s));
+      await dbWrite({ table: DB_CONSTANTS.TABLE_SALES, action: 'update', payload: { items: updatedItems, order_status: 'confirmed' }, match: { id: sid } });
   };
 
   const updateOrderItemStatus = async (sid: string, iid: string, st: OrderItemStatus) => {
@@ -928,11 +933,8 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       const updatedItems = sale.items.map(it =>
           it.orderItemId === iid ? { ...it, status: st, served: st === 'served' } : it
       );
-      const { error } = await supabase.from(DB_CONSTANTS.TABLE_SALES)
-          .update({ items: updatedItems }).eq('id', sid);
-      if (!error) {
-          setSales(prev => prev.map(s => s.id === sid ? { ...s, items: updatedItems } : s));
-      }
+      setSales(prev => prev.map(s => s.id === sid ? { ...s, items: updatedItems } : s));
+      await dbWrite({ table: DB_CONSTANTS.TABLE_SALES, action: 'update', payload: { items: updatedItems }, match: { id: sid } });
   };
 
   const removeItemFromOrder = async (sid: string, iid: string) => {
@@ -942,11 +944,8 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       const subtotal = updatedItems.reduce((acc, it) => acc + (it.price * it.quantity), 0);
       const tax = subtotal * (settings.taxRate / 100);
       const total = subtotal + tax;
-      const { error } = await supabase.from(DB_CONSTANTS.TABLE_SALES)
-          .update({ items: updatedItems, subtotal, tax, total }).eq('id', sid);
-      if (!error) {
-          setSales(prev => prev.map(s => s.id === sid ? { ...s, items: updatedItems, subtotal, tax, total } : s));
-      }
+      setSales(prev => prev.map(s => s.id === sid ? { ...s, items: updatedItems, subtotal, tax, total } : s));
+      await dbWrite({ table: DB_CONSTANTS.TABLE_SALES, action: 'update', payload: { items: updatedItems, subtotal, tax, total }, match: { id: sid } });
   };
 
   const categories = useMemo(() => {
@@ -975,6 +974,7 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       discountRules, addDiscountRule, deleteDiscountRule,
       paymentMethods, addPaymentMethod, updatePaymentMethod, deletePaymentMethod,
       printerConnected, connectPrinter, printReceipt,
+      pendingWrites,
       formatPrice
     }}>
       {children}

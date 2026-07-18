@@ -227,7 +227,7 @@ const Navigation = ({ currentTab, setTab }: { currentTab: string, setTab: (t: st
 
 const MainContent = () => {
     const [activeTab, setActiveTab] = useState('pos');
-    const { currentShop, user, loadingAuth, activeStaff, settings, staffList, switchStaff, language, signOut } = useStore();
+    const { currentShop, user, loadingAuth, activeStaff, settings, staffList, switchStaff, language, signOut, pendingWrites } = useStore();
     const [viewMode, setViewMode] = useState<'app' | 'receipt' | 'store' | 'license' | 'manual'>('app');
     const [receiptId, setReceiptId] = useState<string | null>(null);
     const [authView, setAuthView] = useState<'landing' | 'login'>('landing');
@@ -484,9 +484,23 @@ const MainContent = () => {
                 <div className="bg-amber-600 text-white text-center py-2 px-4 flex items-center justify-center gap-2 text-xs font-bold shadow-sm z-[9999] shrink-0 animate-pulse">
                     <span className="w-2 h-2 rounded-full bg-white" />
                     <span>
-                        {language === 'km' 
-                            ? 'របៀបក្រៅបណ្តាញ (Offline Mode) — ប្រព័ន្ធដំណើរការជាធម្មតា ទិន្នន័យត្រូវបានរក្សាទុកក្នុងម៉ាស៊ីនយ៉ាងមានសុវត្ថិភាព!' 
-                            : 'Offline Mode Active — App is running normally with fully cached local storage database.'}
+                        {language === 'km'
+                            ? 'របៀបក្រៅបណ្តាញ (Offline Mode) — ប្រព័ន្ធដំណើរការជាធម្មតា។'
+                            : 'Offline Mode — the app keeps working.'}
+                        {pendingWrites > 0 && (
+                            language === 'km'
+                                ? ` ${pendingWrites} ការផ្លាស់ប្តូរនឹងធ្វើសមកាលកម្មនៅពេលមានអ៊ីនធឺណិត។`
+                                : ` ${pendingWrites} change${pendingWrites === 1 ? '' : 's'} will sync when back online.`)}
+                    </span>
+                </div>
+            )}
+            {!isOffline && pendingWrites > 0 && (
+                <div className="bg-brand-600 text-white text-center py-2 px-4 flex items-center justify-center gap-2 text-xs font-bold shadow-sm z-[9999] shrink-0">
+                    <Loader2 size={12} className="animate-spin" />
+                    <span>
+                        {language === 'km'
+                            ? `កំពុងធ្វើសមកាលកម្ម ${pendingWrites} ការផ្លាស់ប្តូរ...`
+                            : `Syncing ${pendingWrites} pending change${pendingWrites === 1 ? '' : 's'}…`}
                     </span>
                 </div>
             )}
