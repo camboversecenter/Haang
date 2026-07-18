@@ -10,7 +10,7 @@ Haang supports two distinct **authentication modes** and a **five-role permissio
 - Signs in with **Google** (OAuth) or **Demo Mode**.
 - Is the literal `owner_id` of the shop record.
 - Has **full, unconditional access** to every table and feature — RLS grants owners automatic access via the `is_shop_owner()` check, bypassing all role restrictions.
-- Owns the shop's setup, settings, and the **Zero-Knowledge Vault** (see [security-and-vault.md](./security-and-vault.md)).
+- Owns the shop's setup and settings (see [security.md](./security.md)).
 
 ### 2. Staff (Shared-Device / PIN)
 - Used on shared terminals where several employees operate one device that is authenticated as the owner.

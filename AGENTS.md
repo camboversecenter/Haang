@@ -40,11 +40,11 @@ There is currently **no test suite, linter, or formatter** configured. Verify ch
 ## Project structure
 
 ```
-App.tsx              # Root: routing (hash-based), auth/vault gates, PWA logic, nav
+App.tsx              # Root: routing (hash-based), auth gates, PWA logic, nav
 index.tsx            # React entry
 types.ts             # Shared domain types (Shop, Product, Sale, Staff, ...)
 pages/               # Feature screens (see docs/ for each)
-components/          # Shared UI (LockScreen, BarcodeScanner, Logo, zk-vault/*)
+components/          # Shared UI (LockScreen, BarcodeScanner, Logo)
 store/
   StoreContext.tsx   # Central app state + business logic + i18n (large, key file)
   UIContext.tsx      # Toasts/confirm dialogs
@@ -54,7 +54,7 @@ services/
   geminiService.ts   # All AI calls (via Edge Functions)
   storageService.ts  # Image compression + Supabase Storage upload/delete
   printerService.ts  # Bluetooth ESC/POS printing
-zk-vault/            # Zero-knowledge client-side encryption module
+  syncQueue.ts       # Durable offline write queue (replays on reconnect)
 supabase/            # Edge Functions + RBAC/RLS SQL
 docs/                # Detailed feature & role documentation
 ```
@@ -65,7 +65,8 @@ docs/                # Detailed feature & role documentation
 - **Data mapping:** the DB uses `snake_case`; the app uses `camelCase`. Mapping happens manually in `StoreContext` (e.g. `image_url` ↔ `imageUrl`, `track_stock` ↔ `trackStock`). Keep this in sync when adding fields.
 - **Routing** is hash-based in `App.tsx`: `#/s/{shopId}` (public store), `#/r/{saleId}` (public receipt), plus legacy `?mode=` params. There is no router library.
 - **Roles & access:** two auth modes (Google **owner**, or shared-device **staff** via shop phone + 6-digit PIN). Five roles: `admin, manager, cashier, waiter, kitchen`. The active staff role/id are sent as `x-staff-role` / `x-staff-id` headers (`setSupabaseStaffHeaders`) and verified by Postgres RLS on every write. See `docs/user-roles.md` and `supabase/rbac_policies.sql`.
-- **Security / vault:** `zk-vault/` is a self-contained envelope-encryption module (AES-GCM DEK wrapped by a PBKDF2-derived PIN key and/or a WebAuthn passkey PRF key). The unlocked key never leaves the provider closure. See `docs/security-and-vault.md`. Do not weaken the crypto or expose the session key.
+- **Security:** server-enforced via Supabase RLS (see `supabase/rbac_policies.sql` and `docs/security.md`). A client-side zero-knowledge vault was previously integrated as a login gate but encrypted no data, so it was removed; the standalone library still lives in `zk-vault-download/` if a concrete use arises later.
+- **Offline:** the app is offline-capable (see `docs/getting-started.md`). Reads are served from the service-worker cache; writes go through `services/syncQueue.ts` (`dbWrite`), which queues to localStorage when offline and replays FIFO on reconnect. Prefer `dbWrite` over raw `supabase.from().insert/update/delete` for new mutations.
 - **AI:** never call Gemini directly from the client. Add new AI capabilities as an `action` in `supabase/functions/gemini-api/index.ts` and a wrapper in `services/geminiService.ts`.
 - **i18n:** the app supports `en, km, zh, ja, ko` and is **Khmer-first**. Add new UI strings to every language block in `TRANSLATIONS` (`store/StoreContext.tsx`) and use `t('key')` — don't hardcode display text.
 - **Currency:** display is **Cambodian Riel (៛)** via `formatPrice`. Currency/exchange rate are stored per sale but display formatting is KHR-only.
@@ -93,7 +94,7 @@ If you fix any of these, update the corresponding ⚠️ note in `docs/`.
 ## Safety & scope for agents
 
 - **Never commit secrets.** `GEMINI_API_KEY` stays server-side; don't hardcode Supabase service-role keys.
-- **Don't weaken RLS or the zk-vault crypto** without explicit instruction — they are the security backbone.
+- **Don't weaken RLS** without explicit instruction — it is the security backbone.
 - **Keep the brand reserved:** code is Apache-2.0, but the "Haang"/"Little Tony" name and logo are trademarks (`TRADEMARK.md`). Don't add conflicting branding.
 - When adding UI text, keep it translatable and Khmer-first.
 - Prefer small, focused changes; update `docs/` when behavior changes.

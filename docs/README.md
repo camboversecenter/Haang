@@ -9,7 +9,7 @@ Detailed documentation for **Haang** (branded *Little Tony APP*) — a mobile-fi
 ### Getting Started & Access
 - [Getting Started](./getting-started.md) — authentication modes, shop setup, login, offline/PWA.
 - [User Roles & Access Control](./user-roles.md) — the five staff roles, permission matrix, RLS enforcement.
-- [Security & Zero-Knowledge Vault](./security-and-vault.md) — RLS, client-side encryption, passkeys.
+- [Security & Access Control](./security.md) — RLS, authentication, and access gates.
 
 ### Core Features
 - [Point of Sale (POS)](./pos.md) — selling, cart, discounts, checkout, payment methods.

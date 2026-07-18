@@ -34,10 +34,10 @@
 
 ### Security & Access
 - **Role-based access** for staff: `admin`, `manager`, `cashier`, `waiter`, `kitchen`, with **6-digit PIN** login and a shared-device lock screen.
-- **Zero-Knowledge Vault** — client-side encryption using **WebAuthn passkeys (PRF extension)**, **PBKDF2 (600k iterations)** and **AES-GCM**. The backend stores only ciphertext; keys are derived entirely in the browser.
+- **Server-enforced RLS** — Supabase Row-Level Security isolates each shop's data and gates writes by role.
 
 ### Platform
-- **Offline-first PWA** — installable, cached local storage, and network-status awareness so the app keeps working without internet.
+- **Offline-first PWA** — installable, with a service-worker cache for reads and a **durable write queue** that syncs changes when the connection returns.
 - **Localization** — Khmer-first UI with English, and type-level support for `en`, `km`, `zh`, `ja`, `ko`.
 
 ---
@@ -58,12 +58,11 @@
 ## 📁 Project Structure
 
 ```
-├── App.tsx              # Root app: routing, auth gates, vault gates, PWA logic
+├── App.tsx              # Root app: routing, auth gates, PWA logic
 ├── pages/               # Feature screens (POS, Inventory, Dashboard, Tables, Kitchen, ...)
-├── components/          # Shared UI (LockScreen, BarcodeScanner, Logo, zk-vault/*)
+├── components/          # Shared UI (LockScreen, BarcodeScanner, Logo)
 ├── store/               # StoreContext (app state + i18n) and UIContext
-├── services/            # Supabase client, Gemini, storage, printer, schema
-├── zk-vault/            # Zero-knowledge encryption (crypto, context, hooks)
+├── services/            # Supabase client, Gemini, storage, printer, sync queue, schema
 ├── supabase/            # Edge Functions, RBAC policies, seed SQL
 └── types.ts             # Shared domain types (Shop, Product, Sale, Staff, ...)
 ```

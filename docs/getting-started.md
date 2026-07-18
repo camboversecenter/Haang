@@ -28,14 +28,12 @@ On submit, any logo file is uploaded to Supabase storage and `createShop(name, t
 
 On each load, the app (`App.tsx`) checks a sequence of gates before showing the main screens:
 
-1. Not logged in → **Login**.
+1. Not logged in → **Login** (or the public **Landing** page for first-time visitors).
 2. Owner without a shop → **Shop Setup**.
-3. Vault not yet created → **Vault Setup** (create PIN, optionally register a passkey).
-4. Vault locked → **Vault Unlock** (PIN or passkey).
-5. Shared device with no active operator (multi-role on) → **Lock Screen** (pick staff + PIN).
-6. Authorized → **Main app**.
+3. Shared device with no active operator (multi-role on) → **Lock Screen** (pick staff + PIN).
+4. Authorized → **Main app**.
 
-See [security-and-vault.md](./security-and-vault.md) for the vault steps.
+See [security.md](./security.md) for authentication and access control.
 
 ## Single-operator vs multi-role
 

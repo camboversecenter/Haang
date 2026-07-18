@@ -56,9 +56,6 @@ Configure the **payment methods** shown at checkout and on the public storefront
 
 ## Hardware tab
 
-### Secure Passkey Vault
-Renders the **Vault Settings** (device biometrics / hardware security keys / recovery passcode). See [security-and-vault.md](./security-and-vault.md).
-
 ### Printer
 - Shows Bluetooth ESC/POS printer connection status and a **Connect** button.
 - Supports 58mm/80mm thermal printers. See printing details in [orders-and-receipts.md](./orders-and-receipts.md).
