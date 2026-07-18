@@ -107,3 +107,7 @@ Haang is a **free, community-driven** project for Cambodian SMEs. It is sustaine
 - **Contributing:** contributions are welcome under the DCO sign-off model — see [`CONTRIBUTING.md`](./CONTRIBUTING.md).
 
 Copyright © 2026 Little Tony.
+
+### Acknowledgements
+
+Haang is incubated by the **CamboVerse Center, National University of Management (NUM)**.
