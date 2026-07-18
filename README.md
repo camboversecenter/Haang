@@ -95,7 +95,3 @@ npm run build     # production build
 npm run preview   # preview the build locally
 npm run deploy    # deploy to Cloudflare Pages
 ```
-
----
-
-*View the original AI Studio app: https://ai.studio/apps/drive/1kNN3PMJnNVQd1RItt_eRFqOVzj_pn_Uk*
