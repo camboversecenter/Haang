@@ -2,9 +2,9 @@ import React, { useState } from 'react';
 import { useStore } from '../store/StoreContext';
 import { useUI } from '../store/UIContext';
 import { Logo } from '../components/Logo';
-import { Sparkles, ArrowRight, Users, Lock, KeyRound, Phone, BookOpen, AlertTriangle } from 'lucide-react';
+import { Sparkles, ArrowRight, Users, Lock, KeyRound, Phone, BookOpen, AlertTriangle, ChevronLeft } from 'lucide-react';
 
-export default function Login() {
+export default function Login({ onBack }: { onBack?: () => void } = {}) {
   const { signInWithGoogle, loginAsStaff, loadingAuth, t } = useStore();
   const { showToast } = useUI();
   
@@ -39,6 +39,14 @@ export default function Login() {
       </div>
 
       <div className="relative z-10 w-full max-w-md mt-6 text-center">
+         {onBack && (
+            <button
+               onClick={onBack}
+               className="absolute -top-2 left-0 flex items-center gap-1 text-white/80 hover:text-white text-sm font-bold transition-colors"
+            >
+               <ChevronLeft size={18} /> Home
+            </button>
+         )}
          <div className="flex justify-center mb-6">
               <div className="bg-white/10 backdrop-blur-md p-4 rounded-3xl shadow-xl border border-white/20 ring-1 ring-white/10">
                 <Logo className="w-16 h-16" textClassName="text-4xl text-white" />

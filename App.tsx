@@ -17,6 +17,7 @@ import ReceiptView from './pages/ReceiptView';
 import PublicStore from './pages/PublicStore';
 import Tables from './pages/Tables';
 import Login from './pages/Login';
+import Landing from './pages/Landing';
 import Kitchen from './pages/Kitchen';
 import CommunityLicense from './pages/CommunityLicense';
 import UserManual from './pages/UserManual';
@@ -229,6 +230,7 @@ const MainContent = () => {
     const { currentShop, user, loadingAuth, activeStaff, settings, staffList, switchStaff, language, signOut } = useStore();
     const [viewMode, setViewMode] = useState<'app' | 'receipt' | 'store' | 'license' | 'manual'>('app');
     const [receiptId, setReceiptId] = useState<string | null>(null);
+    const [authView, setAuthView] = useState<'landing' | 'login'>('landing');
 
     // --- Secure Passkey Vault State ---
     const { isUnlocked, checkVaultStatus } = useZkVault();
@@ -396,8 +398,12 @@ const MainContent = () => {
     // --- ACCESS LOGIC ---
     
     // Condition 1: Not Logged in at all (Neither Owner nor Staff)
+    // Public visitors land on the marketing page; "Get Started" opens Login.
     if (!user && !activeStaff) {
-        return <Login />;
+        if (authView === 'landing') {
+            return <Landing onGetStarted={() => setAuthView('login')} />;
+        }
+        return <Login onBack={() => setAuthView('landing')} />;
     }
 
     // Condition 2: Owner Logged in but No Shop Set Up
