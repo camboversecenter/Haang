@@ -239,14 +239,18 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   };
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => {
-        if (data.user) {
-            setUser(data.user);
-            loadShopData(data.user.id);
+    // Use getSession() (reads the persisted session from local storage, no
+    // network) instead of getUser() (which validates against the auth server).
+    // This lets a previously-authenticated user stay signed in while OFFLINE.
+    supabase.auth.getSession().then(({ data }) => {
+        const sessionUser = data.session?.user;
+        if (sessionUser) {
+            setUser(sessionUser);
+            loadShopData(sessionUser.id);
         } else {
             setLoadingAuth(false);
         }
-    });
+    }).catch(() => setLoadingAuth(false));
 
     const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
         if (session?.user) {

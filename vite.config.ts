@@ -13,7 +13,14 @@ export default defineConfig({
         type: 'module'
       },
       workbox: {
-        globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
+        globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2,json}'],
+        globIgnores: ['og-image.png'], // social share image, not needed offline
+        // SPA fallback: any offline navigation serves the cached app shell.
+        navigateFallback: 'index.html',
+        navigateFallbackDenylist: [/^\/rest\//, /^\/auth\//, /^\/storage\//, /^\/realtime\//],
+        cleanupOutdatedCaches: true,
+        clientsClaim: true,
+        skipWaiting: true,
         runtimeCaching: [
           {
             urlPattern: /^https:\/\/fonts\.(?:googleapis|gstatic)\.com\/.*/i,
@@ -24,9 +31,11 @@ export default defineConfig({
                 maxEntries: 30,
                 maxAgeSeconds: 60 * 60 * 24 * 365, // 1 year
               },
+              cacheableResponse: { statuses: [0, 200] },
             },
           },
           {
+            // Tailwind CDN runtime + jsDelivr — required for styling offline.
             urlPattern: /^https:\/\/cdn\.(?:jsdelivr|tailwindcss)\.com\/.*/i,
             handler: 'CacheFirst',
             options: {
@@ -35,6 +44,48 @@ export default defineConfig({
                 maxEntries: 10,
                 maxAgeSeconds: 60 * 60 * 24 * 30, // 30 days
               },
+              cacheableResponse: { statuses: [0, 200] },
+            },
+          },
+          {
+            // esm.sh modules referenced by the import map — cache for offline.
+            urlPattern: /^https:\/\/esm\.sh\/.*/i,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'esm-cache',
+              expiration: {
+                maxEntries: 80,
+                maxAgeSeconds: 60 * 60 * 24 * 30,
+              },
+              cacheableResponse: { statuses: [0, 200] },
+            },
+          },
+          {
+            // Supabase DATA (REST). NetworkFirst: fresh when online, last-known
+            // data (catalog, menu, settings, sales…) served when OFFLINE.
+            urlPattern: /^https:\/\/.*\.supabase\.co\/rest\/v1\/.*/i,
+            handler: 'NetworkFirst',
+            options: {
+              cacheName: 'supabase-data-cache',
+              networkTimeoutSeconds: 5,
+              expiration: {
+                maxEntries: 300,
+                maxAgeSeconds: 60 * 60 * 24 * 30, // 30 days
+              },
+              cacheableResponse: { statuses: [0, 200] },
+            },
+          },
+          {
+            // Supabase STORAGE (product images, logos, QR, payment proofs).
+            urlPattern: /^https:\/\/.*\.supabase\.co\/storage\/v1\/.*/i,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'supabase-storage-cache',
+              expiration: {
+                maxEntries: 400,
+                maxAgeSeconds: 60 * 60 * 24 * 30, // 30 days
+              },
+              cacheableResponse: { statuses: [0, 200] },
             },
           },
           {
@@ -46,6 +97,7 @@ export default defineConfig({
                 maxEntries: 50,
                 maxAgeSeconds: 60 * 60 * 24 * 30, // 30 days
               },
+              cacheableResponse: { statuses: [0, 200] },
             },
           },
         ],
@@ -54,6 +106,9 @@ export default defineConfig({
         name: 'Little Tony APP',
         short_name: 'Little Tony APP',
         description: 'Full-featured Smart Cloud POS & Table Self-Ordering platform for beautiful local retail and restaurants in Cambodia.',
+        id: '/',
+        start_url: '/',
+        scope: '/',
         theme_color: '#4f46e5',
         background_color: '#f8fafc',
         display: 'standalone',
