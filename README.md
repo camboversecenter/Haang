@@ -1,7 +1,3 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
-
 # Haang (ហាង) — Little Tony APP
 
 **Haang** is a mobile-first **Point of Sale (POS) and Inventory Management** system built specifically for **Cambodian small businesses (SMEs)**. It supports both **retail shops** and **restaurants**, ships as an installable **offline-capable PWA**, is **Khmer-first and bilingual**, and uses **AI (Google Gemini)** to assist with everyday shop tasks.
