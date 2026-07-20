@@ -7,7 +7,6 @@ export default {
     './pages/**/*.{ts,tsx}',
     './components/**/*.{ts,tsx}',
     './store/**/*.{ts,tsx}',
-    './zk-vault/**/*.{ts,tsx}',
   ],
   theme: {
     extend: {

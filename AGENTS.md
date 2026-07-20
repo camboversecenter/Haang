@@ -65,7 +65,7 @@ docs/                # Detailed feature & role documentation
 - **Data mapping:** the DB uses `snake_case`; the app uses `camelCase`. Mapping happens manually in `StoreContext` (e.g. `image_url` ↔ `imageUrl`, `track_stock` ↔ `trackStock`). Keep this in sync when adding fields.
 - **Routing** is hash-based in `App.tsx`: `#/s/{shopId}` (public store), `#/r/{saleId}` (public receipt), plus legacy `?mode=` params. There is no router library.
 - **Roles & access:** two auth modes (Google **owner**, or shared-device **staff** via shop phone + 6-digit PIN). Five roles: `admin, manager, cashier, waiter, kitchen`. The active staff role/id are sent as `x-staff-role` / `x-staff-id` headers (`setSupabaseStaffHeaders`) and verified by Postgres RLS on every write. See `docs/user-roles.md` and `supabase/rbac_policies.sql`.
-- **Security:** server-enforced via Supabase RLS (see `supabase/rbac_policies.sql` and `docs/security.md`). A client-side zero-knowledge vault was previously integrated as a login gate but encrypted no data, so it was removed; the standalone library still lives in `zk-vault-download/` if a concrete use arises later.
+- **Security:** server-enforced via Supabase RLS (see `supabase/rbac_policies.sql` and `docs/security.md`). A client-side zero-knowledge vault was previously integrated as a login gate but encrypted no data, so it was removed entirely (both the integration and the standalone library).
 - **Offline:** the app is offline-capable (see `docs/getting-started.md`). Reads are served from the service-worker cache; writes go through `services/syncQueue.ts` (`dbWrite`), which queues to localStorage when offline and replays FIFO on reconnect. Prefer `dbWrite` over raw `supabase.from().insert/update/delete` for new mutations.
 - **AI:** never call Gemini directly from the client. Add new AI capabilities as an `action` in `supabase/functions/gemini-api/index.ts` and a wrapper in `services/geminiService.ts`.
 - **i18n:** the app supports `en, km, zh, ja, ko` and is **Khmer-first**. Add new UI strings to every language block in `TRANSLATIONS` (`store/StoreContext.tsx`) and use `t('key')` — don't hardcode display text.
@@ -85,7 +85,7 @@ These are real in the current code (documented with ⚠️ notes in `docs/`):
 
 - **Stub functions in `StoreContext.tsx`:** `verifyOrder`, `exportSalesData`, `repayDebt`, and the product-activity functions (`getProductActivities`/`fetchMoreActivities`/`hasMoreActivities`) are stubs. Their UIs show success toasts but the underlying operation is not implemented.
 - **Checkout totals:** `checkout` persists `tax: 0` and a total based on **undiscounted** prices, so stored/receipt totals can differ from what the POS displays.
-- **PIN length inconsistency:** Settings creates 6-digit PINs (default `123456`), but the Login staff-PIN field is capped at 4 characters.
+- **PIN length:** Settings creates 6-digit PINs (default `123456`); the Login staff-PIN field now accepts 6 digits to match (previously capped at 4).
 - **Public store chat:** the customer-side chat/activity-log state is never populated (Call/Bill alerts do work).
 - **No delete-product button** exists in the Inventory UI.
 
