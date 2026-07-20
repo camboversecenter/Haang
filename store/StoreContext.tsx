@@ -1,8 +1,9 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode, useMemo } from 'react';
-import { supabase, setSupabaseStaffHeaders } from '../services/supabaseClient';
+import React, { createContext, useContext, useState, useEffect, useRef, ReactNode, useMemo } from 'react';
+import { supabase, setSupabaseStaffToken } from '../services/supabaseClient';
 import { DB_CONSTANTS } from '../services/supabaseSchema';
 import { printer } from '../services/printerService';
 import { dbWrite, initSync, onQueueChange, getQueueLength } from '../services/syncQueue';
+import { notifyShopDataChanged, notifyTableOrderChanged } from '../services/shopBus';
 import { 
   Shop, Product, CartItem, Sale, Customer, Staff, Settings, 
   Booking, Table, ProductActivity, DiscountRule, PaymentMethod, 
@@ -10,6 +11,47 @@ import {
 } from '../types';
 
 export type LanguageCode = 'en' | 'km' | 'zh' | 'ja' | 'ko';
+
+// --- Staff session persistence & offline PIN verification helpers ---
+// The server mints a session token after verifying the PIN (bcrypt, server-side).
+// For OFFLINE staff switching on a shared device we keep a local SHA-256 digest
+// of each successfully-used PIN — never the PIN itself — and mint the real
+// token once connectivity returns (owner_activate_staff).
+const STAFF_SESSION_KEY = 'haang_staff_session_v1';
+const PIN_CACHE_KEY = 'haang_pin_cache_v1';
+
+const hashPinLocal = async (pin: string): Promise<string | null> => {
+  try {
+    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(pin));
+    return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+  } catch {
+    return null;
+  }
+};
+
+const readPinCache = (): Record<string, string> => {
+  try { return JSON.parse(localStorage.getItem(PIN_CACHE_KEY) || '{}'); } catch { return {}; }
+};
+
+const seedPinCache = async (staffId: string, pin: string) => {
+  const digest = await hashPinLocal(pin);
+  if (!digest) return;
+  const cache = readPinCache();
+  cache[staffId] = digest;
+  try { localStorage.setItem(PIN_CACHE_KEY, JSON.stringify(cache)); } catch { /* ignore */ }
+};
+
+const verifyPinOffline = async (staffId: string, pin: string): Promise<boolean> => {
+  const digest = await hashPinLocal(pin);
+  if (!digest) return false;
+  return readPinCache()[staffId] === digest;
+};
+
+const isNetworkFailure = (e: any): boolean => {
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return true;
+  const msg = String(e?.message || e || '').toLowerCase();
+  return msg.includes('failed to fetch') || msg.includes('networkerror') || msg.includes('network request failed') || msg.includes('load failed');
+};
 
 interface StoreContextType {
   user: any;
@@ -31,7 +73,8 @@ interface StoreContextType {
   staffList: Staff[];
   activeStaff: Staff | null;
   loginAsStaff: (phone: string, pin: string) => Promise<boolean>;
-  switchStaff: (pin: string, staffId?: string) => boolean;
+  switchStaff: (pin: string, staffId?: string) => Promise<boolean>;
+  activateStaffAsOwner: (staffId: string) => Promise<boolean>;
   logoutStaff: () => void;
   addStaff: (staff: Partial<Staff>) => Promise<void>;
   updateStaff: (id: string, updates: Partial<Staff>) => Promise<void>;
@@ -75,9 +118,11 @@ interface StoreContextType {
   addTable: (name: string, capacity: number) => Promise<void>;
   updateTable: (id: string, updates: Partial<Table>) => Promise<void>;
   addBooking: (booking: any) => Promise<void>;
+  updateBooking: (id: string, updates: Partial<Booking>) => Promise<void>;
+  deleteBooking: (id: string) => Promise<void>;
   startTableSession: (tableId: string) => Promise<void>;
-  finishTableOrder: (saleId: string, tableId: string) => Promise<void>;
-  confirmOrderItems: (saleId: string, tableId: string) => Promise<void>;
+  finishTableOrder: (saleId: string, tableId: string, paymentMethod?: string) => Promise<void>;
+  confirmOrderItems: (saleId: string) => Promise<void>;
   updateOrderItemStatus: (saleId: string, itemId: string, status: OrderItemStatus) => Promise<void>;
   removeItemFromOrder: (saleId: string, itemId: string) => Promise<void>;
   
@@ -221,6 +266,11 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [staffList, setStaffList] = useState<Staff[]>([]);
   const [activeStaff, setActiveStaff] = useState<Staff | null>(null);
+  // Server-minted staff session token (null while offline-activated, pending mint)
+  const [staffToken, setStaffTokenState] = useState<string | null>(null);
+  // True while a standalone staff login session (no Supabase auth user) is active,
+  // so the auth listener's signed-out branch doesn't wipe the loaded shop.
+  const staffSessionRef = useRef(false);
   const [tables, setTables] = useState<Table[]>([]);
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [discountRules, setDiscountRules] = useState<DiscountRule[]>([]);
@@ -254,21 +304,23 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     // Use getSession() (reads the persisted session from local storage, no
     // network) instead of getUser() (which validates against the auth server).
     // This lets a previously-authenticated user stay signed in while OFFLINE.
-    supabase.auth.getSession().then(({ data }) => {
+    supabase.auth.getSession().then(async ({ data }) => {
         const sessionUser = data.session?.user;
         if (sessionUser) {
             setUser(sessionUser);
             loadShopData(sessionUser.id);
-        } else {
-            setLoadingAuth(false);
+            return;
         }
+        // No owner session — try restoring a persisted staff login session.
+        const restored = await restoreStaffSession();
+        if (!restored) setLoadingAuth(false);
     }).catch(() => setLoadingAuth(false));
 
     const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
         if (session?.user) {
             setUser(session.user);
             loadShopData(session.user.id);
-        } else {
+        } else if (!staffSessionRef.current) {
             setUser(null);
             setCurrentShop(null);
             setLoadingAuth(false);
@@ -278,9 +330,80 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     return () => authListener.subscription.unsubscribe();
   }, []);
 
+  const setStaffToken = (token: string | null) => {
+      setSupabaseStaffToken(token);
+      setStaffTokenState(token);
+  };
+
+  /** Restore a persisted phone+PIN staff session (standalone staff device). */
+  const restoreStaffSession = async (): Promise<boolean> => {
+      let saved: { token: string; staff: Staff } | null = null;
+      try { saved = JSON.parse(localStorage.getItem(STAFF_SESSION_KEY) || 'null'); } catch { saved = null; }
+      if (!saved?.token || !saved?.staff?.shopId) return false;
+
+      setSupabaseStaffToken(saved.token);
+      try {
+          const { data, error } = await supabase.rpc(DB_CONSTANTS.RPC_VALIDATE_STAFF_SESSION);
+          if (error || !data || data.length === 0) {
+              // Expired / revoked server-side — clear it.
+              localStorage.removeItem(STAFF_SESSION_KEY);
+              setSupabaseStaffToken(null);
+              return false;
+          }
+          const s = data[0];
+          staffSessionRef.current = true;
+          setStaffTokenState(saved.token);
+          setActiveStaff({ id: s.id, shopId: s.shop_id, name: s.name, role: s.role, avatarUrl: s.avatar_url });
+          await loadShopData({ shopId: s.shop_id });
+          return true;
+      } catch {
+          // Offline: trust the cached session until we can validate.
+          staffSessionRef.current = true;
+          setStaffTokenState(saved.token);
+          setActiveStaff(saved.staff);
+          await loadShopData({ shopId: saved.staff.shopId });
+          return true;
+      }
+  };
+
+  // Central realtime: one shop-wide channel keeps EVERY staff screen (POS,
+  // Orders, Tables, Kitchen, Dashboard) in sync without per-page subscriptions.
+  //  - broadcast 'data_changed': sent by staff devices and the customer QR page
+  //    after any order mutation (works regardless of RLS / auth mode)
+  //  - postgres_changes on sales: extra safety net for owner-authenticated
+  //    devices (fires even if a writer forgot to broadcast)
   useEffect(() => {
-    setSupabaseStaffHeaders(activeStaff?.role, activeStaff?.id);
-  }, [activeStaff]);
+      if (!currentShop) return;
+      let timer: ReturnType<typeof setTimeout> | null = null;
+      const throttledRefresh = () => {
+          if (timer) return;
+          timer = setTimeout(() => { timer = null; refreshSales(); }, 800);
+      };
+      const channel = supabase
+          .channel(`haang-shop:${currentShop.id}`)
+          .on('broadcast', { event: 'data_changed' }, throttledRefresh)
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'sales', filter: `shop_id=eq.${currentShop.id}` }, throttledRefresh)
+          .subscribe();
+      return () => {
+          if (timer) clearTimeout(timer);
+          supabase.removeChannel(channel);
+      };
+  }, [currentShop?.id]);
+
+  // Offline staff activation leaves us without a server session token. Once the
+  // owner-authenticated device is back online, mint the real token silently.
+  useEffect(() => {
+      const mintIfNeeded = async () => {
+          if (!user || !activeStaff || staffToken || navigator.onLine === false) return;
+          try {
+              const { data } = await supabase.rpc(DB_CONSTANTS.RPC_OWNER_ACTIVATE_STAFF, { _staff_id: activeStaff.id });
+              if (data && data.length > 0) setStaffToken(data[0].session_token);
+          } catch { /* retry on next reconnect */ }
+      };
+      mintIfNeeded();
+      window.addEventListener('online', mintIfNeeded);
+      return () => window.removeEventListener('online', mintIfNeeded);
+  }, [user, activeStaff, staffToken]);
 
   const loadShopData = async (param: string | { shopId: string }) => {
       setLoadingAuth(true);
@@ -313,7 +436,8 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
               const [pRes, cRes, stRes, tRes, bRes, dRes, pmRes, sRes] = await Promise.all([
                   supabase.from(DB_CONSTANTS.TABLE_PRODUCTS).select('*').eq('shop_id', shop.id),
                   supabase.from(DB_CONSTANTS.TABLE_CUSTOMERS).select('*').eq('shop_id', shop.id),
-                  supabase.from(DB_CONSTANTS.TABLE_STAFF).select('*').eq('shop_id', shop.id),
+                  // PIN hashes are never selected — column privileges block them anyway.
+                  supabase.from(DB_CONSTANTS.TABLE_STAFF).select('id, shop_id, name, role, avatar_url, has_pin').eq('shop_id', shop.id),
                   supabase.from(DB_CONSTANTS.TABLE_TABLES).select('*').eq('shop_id', shop.id),
                   supabase.from(DB_CONSTANTS.TABLE_BOOKINGS).select('*').eq('shop_id', shop.id),
                   supabase.from(DB_CONSTANTS.TABLE_DISCOUNTS).select('*').eq('shop_id', shop.id),
@@ -323,7 +447,7 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
               if(pRes.data) setProducts(pRes.data.map((p: any) => ({...p, shopId: p.shop_id, imageUrl: p.image_url, trackStock: p.track_stock})));
               if(cRes.data) setCustomers(cRes.data.map((c: any) => ({...c, shopId: c.shop_id, totalDebt: c.total_debt, lastInteraction: c.last_interaction})));
-              if(stRes.data) setStaffList(stRes.data.map((s: any) => ({...s, shopId: s.shop_id})));
+              if(stRes.data) setStaffList(stRes.data.map((s: any) => ({id: s.id, shopId: s.shop_id, name: s.name, role: s.role, avatarUrl: s.avatar_url, hasPin: s.has_pin})));
               if(tRes.data) setTables(tRes.data.map((t: any) => ({...t, shopId: t.shop_id, allowOrdering: t.allow_ordering})));
               if(bRes.data) setBookings(bRes.data.map((b: any) => ({...b, shopId: b.shop_id, customerName: b.customer_name, tableId: b.table_id})));
               if(dRes.data) setDiscountRules(dRes.data.map((d: any) => ({...d, shopId: d.shop_id})));
@@ -394,45 +518,146 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       }); 
   };
   const signInAsDemoUser = async () => { };
-  const signOut = async () => { await supabase.auth.signOut(); setActiveStaff(null); };
+  const signOut = async () => {
+      if (staffToken) { try { await supabase.rpc(DB_CONSTANTS.RPC_STAFF_LOGOUT, { _token: staffToken }); } catch { /* best effort */ } }
+      staffSessionRef.current = false;
+      localStorage.removeItem(STAFF_SESSION_KEY);
+      setStaffToken(null);
+      setActiveStaff(null);
+      await supabase.auth.signOut();
+      // Standalone staff sessions have no Supabase auth session, so the auth
+      // listener will not fire — clear the app state explicitly.
+      setUser(null);
+      setCurrentShop(null);
+  };
 
   const loginAsStaff = async (phone: string, pin: string) => {
-      const { data, error } = await supabase.rpc(DB_CONSTANTS.RPC_STAFF_LOGIN, { phone_number: phone, pin_code: pin });
+      const { data } = await supabase.rpc(DB_CONSTANTS.RPC_STAFF_LOGIN, { phone_number: phone, pin_code: pin });
       if (data && data.length > 0) {
           const s = data[0];
           const loggedStaff: Staff = {
               id: s.id,
               shopId: s.shop_id,
               name: s.name,
-              pin: pin,
               role: s.role,
               avatarUrl: s.avatar_url
           };
+          staffSessionRef.current = true;
+          // Set the token header BEFORE loading shop data — RLS needs it.
+          setStaffToken(s.session_token);
           setActiveStaff(loggedStaff);
+          try { localStorage.setItem(STAFF_SESSION_KEY, JSON.stringify({ token: s.session_token, staff: loggedStaff })); } catch { /* ignore */ }
+          await seedPinCache(s.id, pin);
           await loadShopData({ shopId: s.shop_id });
           return true;
       }
       return false;
   };
-  const switchStaff = (pin: string, staffId?: string) => {
-      const staff = staffList.find(s => s.pin === pin && (staffId ? s.id === staffId : true));
-      if (staff) { setActiveStaff(staff); return true; }
-      return false;
+
+  /**
+   * Lock-screen operator switch. The PIN is verified SERVER-SIDE
+   * (staff_switch RPC) and a session token is minted. When the shared device
+   * is offline, fall back to the locally-cached SHA-256 digest of the PIN and
+   * mint the real token on reconnect (owner_activate_staff).
+   */
+  const switchStaff = async (pin: string, staffId?: string): Promise<boolean> => {
+      const target = staffId ? staffList.find(s => s.id === staffId) : null;
+      try {
+          if (staffId) {
+              const { data, error } = await supabase.rpc(DB_CONSTANTS.RPC_STAFF_SWITCH, { _staff_id: staffId, _pin: pin });
+              if (error) throw error;
+              if (data && data.length > 0) {
+                  const s = data[0];
+                  setStaffToken(s.session_token);
+                  setActiveStaff({ id: s.id, shopId: s.shop_id, name: s.name, role: s.role, avatarUrl: s.avatar_url, hasPin: true });
+                  await seedPinCache(s.id, pin);
+                  return true;
+              }
+              return false;
+          }
+          // No staff id — legacy call shape; cannot verify server-side safely.
+          return false;
+      } catch (e) {
+          if (isNetworkFailure(e) && target && await verifyPinOffline(target.id, pin)) {
+              // Offline shared-device switch: activate locally; token minted on reconnect.
+              setStaffToken(null);
+              setActiveStaff(target);
+              return true;
+          }
+          console.error('switchStaff failed', e);
+          return false;
+      }
   };
-  const logoutStaff = () => { setActiveStaff(null); };
+
+  /** Owner-authorized activation without a PIN (single-role auto-login). */
+  const activateStaffAsOwner = async (staffId: string): Promise<boolean> => {
+      const target = staffList.find(s => s.id === staffId);
+      try {
+          const { data, error } = await supabase.rpc(DB_CONSTANTS.RPC_OWNER_ACTIVATE_STAFF, { _staff_id: staffId });
+          if (error) throw error;
+          if (data && data.length > 0) {
+              const s = data[0];
+              setStaffToken(s.session_token);
+              setActiveStaff({ id: s.id, shopId: s.shop_id, name: s.name, role: s.role, avatarUrl: s.avatar_url, hasPin: true });
+              return true;
+          }
+          return false;
+      } catch (e) {
+          if (isNetworkFailure(e) && target) {
+              // Offline: the owner auth session is the authority; mint on reconnect.
+              setStaffToken(null);
+              setActiveStaff(target);
+              return true;
+          }
+          console.error('activateStaffAsOwner failed', e);
+          return false;
+      }
+  };
+
+  const logoutStaff = () => {
+      if (staffToken) { supabase.rpc(DB_CONSTANTS.RPC_STAFF_LOGOUT, { _token: staffToken }).then(() => {}, () => {}); }
+      setStaffToken(null);
+      setActiveStaff(null);
+  };
+
   const addStaff = async (staff: Partial<Staff>) => {
       if (!currentShop) return;
-      const newStaff = { ...staff, id: generateId(), shop_id: currentShop.id };
-      await supabase.from(DB_CONSTANTS.TABLE_STAFF).insert(newStaff);
-      setStaffList(prev => [...prev, { ...staff, id: newStaff.id, shopId: currentShop.id } as Staff]);
+      const id = generateId();
+      const { error } = await supabase.from(DB_CONSTANTS.TABLE_STAFF).insert({
+          id, shop_id: currentShop.id, name: staff.name, pin: staff.pin || '', role: staff.role, avatar_url: staff.avatarUrl
+      });
+      if (error) { console.error('addStaff failed', error); throw error; }
+      if (staff.pin) await seedPinCache(id, staff.pin);
+      setStaffList(prev => [...prev, { id, shopId: currentShop.id, name: staff.name || '', role: staff.role || 'cashier', avatarUrl: staff.avatarUrl, hasPin: !!staff.pin } as Staff]);
   };
   const updateStaff = async (id: string, updates: Partial<Staff>) => {
-      await supabase.from(DB_CONSTANTS.TABLE_STAFF).update(updates).eq('id', id);
-      setStaffList(prev => prev.map(s => s.id === id ? { ...s, ...updates } : s));
+      const payload: any = {};
+      if (updates.name !== undefined) payload.name = updates.name;
+      if (updates.role !== undefined) payload.role = updates.role;
+      if (updates.avatarUrl !== undefined) payload.avatar_url = updates.avatarUrl;
+      if (updates.pin !== undefined) payload.pin = updates.pin; // hashed by DB trigger
+      const { error } = await supabase.from(DB_CONSTANTS.TABLE_STAFF).update(payload).eq('id', id);
+      if (error) { console.error('updateStaff failed', error); throw error; }
+      if (updates.pin) await seedPinCache(id, updates.pin);
+      setStaffList(prev => prev.map(s => s.id === id ? { ...s, ...updates, pin: undefined, hasPin: updates.pin ? true : s.hasPin } : s));
+      // Keep the live operator in sync — a role downgrade applies immediately.
+      // (The server session still carries the old role until re-login, so force
+      // a fresh session when the role changed.)
+      if (activeStaff?.id === id) {
+          if (updates.role && updates.role !== activeStaff.role) {
+              logoutStaff();
+          } else {
+              setActiveStaff(prev => prev && prev.id === id ? { ...prev, ...updates, pin: undefined } as Staff : prev);
+          }
+      }
   };
   const deleteStaff = async (id: string) => {
-      await supabase.from(DB_CONSTANTS.TABLE_STAFF).delete().eq('id', id);
+      const { error } = await supabase.from(DB_CONSTANTS.TABLE_STAFF).delete().eq('id', id);
+      if (error) { console.error('deleteStaff failed', error); throw error; }
       setStaffList(prev => prev.filter(s => s.id !== id));
+      // A deleted operator must not keep an active session on this device.
+      // (Server-side, deleting the staff row already cascades its sessions.)
+      if (activeStaff?.id === id) logoutStaff();
   };
 
   const addProduct = async (product: Partial<Product>) => {
@@ -571,20 +796,14 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       return { finalPrice: bestPrice, discountAmount, rule: appliedRule };
   };
 
-  const checkout = (method: string, customerId?: string) => {
-      if (!currentShop) return null;
-      const total = cart.reduce((acc, item) => acc + (item.price * item.quantity), 0);
-      const sale: Sale = {
-          id: generateId(),
-          shopId: currentShop.id,
-          timestamp: Date.now(),
-          total, subtotal: total, tax: 0, paymentMethod: method, orderStatus: 'completed',
-          items: cart, currency: settings.currency, exchangeRate: settings.exchangeRate, customerId
-      };
-
-      // Decrement product stock inside local state and database
+  /**
+   * Decrement stock for every tracked item in a sale, both in local state and
+   * (offline-safely) in the database. Shared by retail checkout, manual sales,
+   * online-order verification, and dine-in order completion.
+   */
+  const applyStockDecrement = (items: CartItem[]) => {
       const updatedProducts = products.map(p => {
-          const cartItemsForProduct = cart.filter(item => item.id === p.id);
+          const cartItemsForProduct = items.filter(item => item.id === p.id);
           if (cartItemsForProduct.length === 0) return p;
           if (p.trackStock === false) return p;
 
@@ -605,11 +824,7 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
               }
           });
 
-          return {
-              ...p,
-              stock: newStock,
-              variants: newVariants
-          };
+          return { ...p, stock: newStock, variants: newVariants };
       });
 
       setProducts(updatedProducts);
@@ -622,6 +837,59 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
               dbWrite({ table: DB_CONSTANTS.TABLE_PRODUCTS, action: 'update', payload: { stock: p.stock, variants: p.variants }, match: { id: p.id } });
           }
       });
+  };
+
+  /**
+   * Notify everyone affected by an order change: the customer QR page of the
+   * table (if any) and all other staff devices of this shop. The customer page
+   * cannot read the sales table (RLS), so it listens for broadcasts and
+   * refetches via RPC.
+   */
+  const broadcastTableUpdate = (tableId?: string | null) => {
+      notifyTableOrderChanged(tableId);
+      notifyShopDataChanged(currentShop?.id);
+  };
+
+  const checkout = (method: string, customerId?: string) => {
+      if (!currentShop) return null;
+      if (cart.length === 0) return null;
+
+      // Apply the exact discount math the POS displays, so the stored sale
+      // matches what the cashier and customer saw on screen.
+      const itemsWithDiscounts: CartItem[] = cart.map(item => {
+          const { finalPrice, discountAmount, rule } = getBestDiscountForItem(item, customerId);
+          return {
+              ...item,
+              finalPrice,
+              discountAmount,
+              appliedDiscount: rule ? { name: rule.name, amountSaved: discountAmount } : undefined
+          };
+      });
+
+      const subtotal = itemsWithDiscounts.reduce((sum, i) => sum + ((i.finalPrice ?? i.price) * i.quantity), 0);
+      const tax = subtotal * ((settings.taxRate || 0) / 100);
+      const total = subtotal + tax;
+      const isCredit = method === 'credit';
+
+      const sale: Sale = {
+          id: generateId(),
+          shopId: currentShop.id,
+          timestamp: Date.now(),
+          total, subtotal, tax, paymentMethod: method,
+          // Credit sales are tracked as open debt until repaid (see repayDebt).
+          orderStatus: isCredit ? 'debt' : 'completed',
+          items: itemsWithDiscounts, currency: settings.currency, exchangeRate: settings.exchangeRate, customerId
+      };
+
+      applyStockDecrement(itemsWithDiscounts);
+
+      // Credit: record the amount on the customer's debt ledger
+      if (isCredit && customerId) {
+          const customer = customers.find(c => c.id === customerId);
+          const newDebt = (customer?.totalDebt || 0) + total;
+          setCustomers(prev => prev.map(c => c.id === customerId ? { ...c, totalDebt: newDebt } : c));
+          dbWrite({ table: DB_CONSTANTS.TABLE_CUSTOMERS, action: 'update', payload: { total_debt: newDebt }, match: { id: customerId } });
+      }
 
       setSales(prev => [sale, ...prev]);
       clearCart();
@@ -630,49 +898,12 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
           subtotal: sale.subtotal, tax: sale.tax, payment_method: sale.paymentMethod, order_status: sale.orderStatus,
           items: sale.items, currency: sale.currency, exchange_rate: sale.exchangeRate, customer_id: sale.customerId
       }});
+      notifyShopDataChanged(currentShop.id);
       return sale;
   };
 
   const addManualSale = async (sale: Sale) => {
-      // Decrement product stock inside local state and database for manual sales addition too
-      const updatedProducts = products.map(p => {
-          const cartItemsForProduct = sale.items.filter(item => item.id === p.id);
-          if (cartItemsForProduct.length === 0) return p;
-          if (p.trackStock === false) return p;
-
-          let newStock = p.stock || 0;
-          let newVariants = p.variants ? [...p.variants] : undefined;
-
-          cartItemsForProduct.forEach(item => {
-              if (item.variantId && newVariants) {
-                  newVariants = newVariants.map(v => {
-                      if (v.id === item.variantId) {
-                          return { ...v, stock: Math.max(0, (v.stock || 0) - item.quantity) };
-                      }
-                      return v;
-                  });
-                  newStock = newVariants.reduce((sum, v) => sum + (v.stock || 0), 0);
-              } else {
-                  newStock = Math.max(0, newStock - item.quantity);
-              }
-          });
-
-          return {
-              ...p,
-              stock: newStock,
-              variants: newVariants
-          };
-      });
-
-      setProducts(updatedProducts);
-
-      updatedProducts.forEach((p) => {
-          const originalProduct = products.find(op => op.id === p.id);
-          if (!originalProduct) return;
-          if (originalProduct.stock !== p.stock || JSON.stringify(originalProduct.variants) !== JSON.stringify(p.variants)) {
-              dbWrite({ table: DB_CONSTANTS.TABLE_PRODUCTS, action: 'update', payload: { stock: p.stock, variants: p.variants }, match: { id: p.id } });
-          }
-      });
+      applyStockDecrement(sale.items);
 
       setSales(prev => [sale, ...prev]);
       await dbWrite({ table: DB_CONSTANTS.TABLE_SALES, action: 'insert', payload: {
@@ -680,6 +911,7 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
           subtotal: sale.subtotal, tax: sale.tax, payment_method: sale.paymentMethod, order_status: sale.orderStatus,
           items: sale.items, currency: sale.currency, exchange_rate: sale.exchangeRate
       }});
+      notifyShopDataChanged(sale.shopId);
   };
 
   const addCustomer = async (name: string, phone?: string, email?: string) => {
@@ -690,11 +922,61 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       return id;
   };
   const updateCustomer = async (id: string, updates: Partial<Customer>) => {
-      await dbWrite({ table: DB_CONSTANTS.TABLE_CUSTOMERS, action: 'update', payload: updates, match: { id } });
+      // Map camelCase → snake_case for the DB payload
+      const payload: any = {};
+      if (updates.name !== undefined) payload.name = updates.name;
+      if (updates.phone !== undefined) payload.phone = updates.phone;
+      if (updates.email !== undefined) payload.email = updates.email;
+      if (updates.totalDebt !== undefined) payload.total_debt = updates.totalDebt;
+      if (updates.lastInteraction !== undefined) payload.last_interaction = updates.lastInteraction;
+      await dbWrite({ table: DB_CONSTANTS.TABLE_CUSTOMERS, action: 'update', payload, match: { id } });
       setCustomers(prev => prev.map(c => c.id === id ? { ...c, ...updates } : c));
   };
-  const repayDebt = async (cid: string, amount: number) => { };
-  const findOrCreateCustomer = async (phone: string, name?: string) => null;
+
+  /**
+   * Record a debt repayment: reduce the customer's ledger and settle their
+   * oldest open 'debt' sales (fully-covered ones flip to 'completed', which is
+   * when they start counting as dashboard revenue).
+   */
+  const repayDebt = async (cid: string, amount: number) => {
+      const customer = customers.find(c => c.id === cid);
+      if (!customer || !(amount > 0)) return;
+
+      const newDebt = Math.max(0, (customer.totalDebt || 0) - amount);
+
+      let remaining = amount;
+      const settledIds: string[] = [];
+      const debtSales = sales
+          .filter(s => s.customerId === cid && s.orderStatus === 'debt')
+          .sort((a, b) => a.timestamp - b.timestamp);
+      for (const s of debtSales) {
+          if (remaining >= s.total) {
+              remaining -= s.total;
+              settledIds.push(s.id);
+          } else {
+              break;
+          }
+      }
+
+      if (settledIds.length > 0) {
+          setSales(prev => prev.map(s => settledIds.includes(s.id) ? { ...s, orderStatus: 'completed' } : s));
+          for (const sid of settledIds) {
+              await dbWrite({ table: DB_CONSTANTS.TABLE_SALES, action: 'update', payload: { order_status: 'completed' }, match: { id: sid } });
+          }
+      }
+
+      setCustomers(prev => prev.map(c => c.id === cid ? { ...c, totalDebt: newDebt, lastInteraction: Date.now() } : c));
+      await dbWrite({ table: DB_CONSTANTS.TABLE_CUSTOMERS, action: 'update', payload: { total_debt: newDebt, last_interaction: Date.now() }, match: { id: cid } });
+  };
+
+  const findOrCreateCustomer = async (phone: string, name?: string): Promise<Customer | null> => {
+      if (!phone || !currentShop) return null;
+      const existing = customers.find(c => c.phone === phone);
+      if (existing) return existing;
+      const id = await addCustomer(name || 'Customer', phone);
+      if (!id) return null;
+      return { id, shopId: currentShop.id, name: name || 'Customer', phone, totalDebt: 0, lastInteraction: Date.now() };
+  };
 
   const addTable = async (name: string, capacity: number) => {
       if (!currentShop) return;
@@ -719,24 +1001,77 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       setBookings(prev => [...prev, { ...booking, id, shopId: currentShop.id }]);
   };
 
+  const updateBooking = async (id: string, updates: Partial<Booking>) => {
+      const payload: any = {};
+      if (updates.customerName !== undefined) payload.customer_name = updates.customerName;
+      if (updates.phone !== undefined) payload.phone = updates.phone;
+      if (updates.time !== undefined) payload.time = updates.time;
+      if (updates.guests !== undefined) payload.guests = updates.guests;
+      if (updates.tableId !== undefined) payload.table_id = updates.tableId;
+      if (updates.notes !== undefined) payload.notes = updates.notes;
+      await dbWrite({ table: DB_CONSTANTS.TABLE_BOOKINGS, action: 'update', payload, match: { id } });
+      setBookings(prev => prev.map(b => b.id === id ? { ...b, ...updates } : b));
+  };
+
+  const deleteBooking = async (id: string) => {
+      await dbWrite({ table: DB_CONSTANTS.TABLE_BOOKINGS, action: 'delete', match: { id } });
+      setBookings(prev => prev.filter(b => b.id !== id));
+  };
+
   const updateSettings = async (updates: Partial<Settings>) => {
       if (!currentShop) return;
-      await supabase.from(DB_CONSTANTS.TABLE_SETTINGS).update({
+      const { error } = await supabase.from(DB_CONSTANTS.TABLE_SETTINGS).update({
           tax_rate: updates.taxRate, enable_public_store: updates.enablePublicStore,
           enable_booking: updates.enableBooking, enable_attributes: updates.enableAttributes,
           enable_multi_roles: updates.enableMultiRoles, default_language: updates.defaultLanguage
       }).eq('shop_id', currentShop.id);
+      if (error) { console.error('updateSettings failed', error); throw error; }
       setSettingsState(prev => ({ ...prev, ...updates }));
   };
   const updateShop = async (updates: Partial<Shop>) => {
       if (!currentShop) return;
-      await supabase.from(DB_CONSTANTS.TABLE_SHOPS).update({ name: updates.name, address: updates.address, phone: updates.phone, logo_url: updates.logoUrl, type: updates.type }).eq('id', currentShop.id);
+      const { error } = await supabase.from(DB_CONSTANTS.TABLE_SHOPS).update({ name: updates.name, address: updates.address, phone: updates.phone, logo_url: updates.logoUrl, type: updates.type }).eq('id', currentShop.id);
+      if (error) { console.error('updateShop failed', error); throw error; }
       setCurrentShop(prev => prev ? { ...prev, ...updates } : null);
   };
 
-  const fetchMoreSales = async () => {};
-  const hasMoreSales = false;
-  const verifyOrder = async (id: string) => {};
+  const SALES_PAGE_SIZE = 50;
+  const [hasMoreSales, setHasMoreSales] = useState(true);
+  const fetchMoreSales = async () => {
+      if (!currentShop) return;
+      const { data, error } = await supabase.from(DB_CONSTANTS.TABLE_SALES)
+          .select('*').eq('shop_id', currentShop.id)
+          .order('timestamp', { ascending: false })
+          .range(sales.length, sales.length + SALES_PAGE_SIZE - 1);
+      if (error || !data) return;
+      if (data.length < SALES_PAGE_SIZE) setHasMoreSales(false);
+      if (data.length > 0) {
+          setSales(prev => {
+              const known = new Set(prev.map(s => s.id));
+              return [...prev, ...data.filter((r: any) => !known.has(r.id)).map(mapSaleRow)];
+          });
+      }
+  };
+  /**
+   * Staff verification of a customer's submitted payment (order_status
+   * 'pending_verification').
+   *  - Table orders: payment is verified → send items to the kitchen
+   *    ('confirmed'); the sale completes when the table is finished.
+   *  - Retail online orders: complete the sale now and decrement stock.
+   */
+  const verifyOrder = async (id: string) => {
+      const sale = sales.find(s => s.id === id);
+      if (!sale) return;
+
+      if (sale.tableId) {
+          await confirmOrderItems(id);
+      } else {
+          applyStockDecrement(sale.items);
+          setSales(prev => prev.map(s => s.id === id ? { ...s, orderStatus: 'completed', paymentMethod: 'khqr' } : s));
+          await dbWrite({ table: DB_CONSTANTS.TABLE_SALES, action: 'update', payload: { order_status: 'completed', payment_method: 'khqr' }, match: { id } });
+      }
+      broadcastTableUpdate(sale.tableId);
+  };
   
   const cancelSale = async (id: string) => {
       try {
@@ -747,8 +1082,10 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
           setSales(prev => prev.map(s => s.id === id ? { ...s, orderStatus: 'cancelled' } : s));
 
-          // If voiding/cancelling a previously valid order, restore product stock
-          if (saleToCancel.orderStatus === 'completed' || saleToCancel.orderStatus === 'confirmed') {
+          // If voiding a previously FINALIZED order, restore product stock.
+          // ('confirmed' dine-in orders never decremented stock — it is taken
+          // at completion — so restoring for them would create phantom stock.)
+          if (saleToCancel.orderStatus === 'completed' || saleToCancel.orderStatus === 'debt') {
               const updatedProducts = products.map(p => {
                   const itemsForProduct = saleToCancel.items.filter(item => item.id === p.id);
                   if (itemsForProduct.length === 0) return p;
@@ -788,11 +1125,12 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
                   }
               }
           }
+          broadcastTableUpdate(saleToCancel.tableId);
       } catch (err) {
           console.error("Failed to cancel sale:", err);
       }
   };
-  
+
   const mapSaleRow = (s: any): Sale => ({
       id: s.id, shopId: s.shop_id, timestamp: s.timestamp, total: Number(s.total), subtotal: Number(s.subtotal),
       tax: Number(s.tax), paymentMethod: s.payment_method, orderStatus: s.order_status,
@@ -808,7 +1146,42 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
           .order('timestamp', { ascending: false }).limit(50);
       if (!error && data) setSales(data.map(mapSaleRow));
   };
-  const exportSalesData = async () => {};
+  /**
+   * Export the shop's full sales history as a CSV download (previously a stub
+   * whose button toasted success while producing nothing).
+   */
+  const exportSalesData = async () => {
+      if (!currentShop) return;
+      const { data, error } = await supabase.from(DB_CONSTANTS.TABLE_SALES)
+          .select('*').eq('shop_id', currentShop.id)
+          .order('timestamp', { ascending: false }).limit(5000);
+      if (error || !data) throw error || new Error('Export failed');
+
+      const esc = (v: any) => {
+          const s = v === null || v === undefined ? '' : String(v);
+          return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+      };
+      const header = ['id', 'date', 'status', 'payment_method', 'subtotal', 'tax', 'total', 'currency', 'table_id', 'customer_id', 'items'];
+      const rows = data.map((s: any) => {
+          const items = typeof s.items === 'string' ? JSON.parse(s.items) : (s.items || []);
+          const itemSummary = items.map((i: any) => `${i.quantity}x ${i.name}${i.variantName ? ` (${i.variantName})` : ''}`).join('; ');
+          return [
+              s.id, new Date(Number(s.timestamp)).toISOString(), s.order_status, s.payment_method,
+              s.subtotal, s.tax, s.total, s.currency, s.table_id || '', s.customer_id || '', itemSummary
+          ].map(esc).join(',');
+      });
+      const csv = '﻿' + [header.join(','), ...rows].join('\n'); // BOM so Excel opens Khmer text correctly
+
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `sales-${currentShop.name.replace(/[^\w-]+/g, '_')}-${new Date().toISOString().slice(0, 10)}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+  };
 
   const addExpense = async (expense: Partial<Expense>) => {
       if (!currentShop) return;
@@ -915,7 +1288,22 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const printReceipt = async (s: Sale) => { if (currentShop) await printer.printReceipt(s, currentShop); };
   
   const startTableSession = async (tid: string) => { updateTable(tid, { status: 'occupied', allowOrdering: true }); };
-  const finishTableOrder = async (sid: string, tid: string) => { updateTable(tid, { status: 'available', allowOrdering: false }); };
+  /**
+   * Close out a dine-in order: record the payment method, mark the sale
+   * 'completed' (it now counts as revenue), decrement stock for its items,
+   * then free the table. Previously this only freed the table, so restaurant
+   * sales never completed and never appeared in the dashboard.
+   */
+  const finishTableOrder = async (sid: string, tid: string, paymentMethod: string = 'cash') => {
+      const sale = sales.find(s => s.id === sid);
+      if (sale && sale.orderStatus !== 'completed' && sale.orderStatus !== 'cancelled') {
+          applyStockDecrement(sale.items);
+          setSales(prev => prev.map(s => s.id === sid ? { ...s, orderStatus: 'completed', paymentMethod } : s));
+          await dbWrite({ table: DB_CONSTANTS.TABLE_SALES, action: 'update', payload: { order_status: 'completed', payment_method: paymentMethod }, match: { id: sid } });
+          broadcastTableUpdate(tid);
+      }
+      updateTable(tid, { status: 'available', allowOrdering: false });
+  };
   const confirmOrderItems = async (sid: string) => {
       const sale = sales.find(s => s.id === sid);
       if (!sale) return;
@@ -925,6 +1313,7 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       );
       setSales(prev => prev.map(s => s.id === sid ? { ...s, items: updatedItems, orderStatus: 'confirmed' } : s));
       await dbWrite({ table: DB_CONSTANTS.TABLE_SALES, action: 'update', payload: { items: updatedItems, order_status: 'confirmed' }, match: { id: sid } });
+      broadcastTableUpdate(sale.tableId);
   };
 
   const updateOrderItemStatus = async (sid: string, iid: string, st: OrderItemStatus) => {
@@ -935,6 +1324,7 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       );
       setSales(prev => prev.map(s => s.id === sid ? { ...s, items: updatedItems } : s));
       await dbWrite({ table: DB_CONSTANTS.TABLE_SALES, action: 'update', payload: { items: updatedItems }, match: { id: sid } });
+      broadcastTableUpdate(sale.tableId);
   };
 
   const removeItemFromOrder = async (sid: string, iid: string) => {
@@ -946,6 +1336,7 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       const total = subtotal + tax;
       setSales(prev => prev.map(s => s.id === sid ? { ...s, items: updatedItems, subtotal, tax, total } : s));
       await dbWrite({ table: DB_CONSTANTS.TABLE_SALES, action: 'update', payload: { items: updatedItems, subtotal, tax, total }, match: { id: sid } });
+      broadcastTableUpdate(sale.tableId);
   };
 
   const categories = useMemo(() => {
@@ -964,12 +1355,12 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       user, loadingAuth, currentShop, settings, language, setLanguage, t,
       createShop, updateShop, updateSettings,
       signInWithGoogle, signInAsDemoUser, signOut,
-      staffList, activeStaff, loginAsStaff, switchStaff, logoutStaff, addStaff, updateStaff, deleteStaff,
+      staffList, activeStaff, loginAsStaff, switchStaff, activateStaffAsOwner, logoutStaff, addStaff, updateStaff, deleteStaff,
       products, categories, addProduct, updateProduct, getProductActivities, fetchMoreActivities, hasMoreActivities, renameCategory, deleteCategory,
       cart, addToCart, removeFromCart, updateCartQuantity, clearCart, checkout, addManualSale, getBestDiscountForItem,
       sales, fetchMoreSales, hasMoreSales, verifyOrder, cancelSale, refreshSales, exportSalesData,
       customers, addCustomer, updateCustomer, repayDebt, findOrCreateCustomer,
-      tables, bookings, addTable, updateTable, addBooking, startTableSession, finishTableOrder, confirmOrderItems, updateOrderItemStatus, removeItemFromOrder,
+      tables, bookings, addTable, updateTable, addBooking, updateBooking, deleteBooking, startTableSession, finishTableOrder, confirmOrderItems, updateOrderItemStatus, removeItemFromOrder,
       addExpense, getDashboardMetrics,
       discountRules, addDiscountRule, deleteDiscountRule,
       paymentMethods, addPaymentMethod, updatePaymentMethod, deletePaymentMethod,

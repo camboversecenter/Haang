@@ -1,9 +1,8 @@
 
 import React, { useEffect } from 'react';
 import { useStore } from '../store/StoreContext';
-import { ChefHat, Clock, CheckCircle, Flame, Check, Loader2 } from 'lucide-react';
+import { ChefHat, Clock, CheckCircle, Flame, Check, Loader2, Bell } from 'lucide-react';
 import { OrderItemStatus } from '../types';
-import { supabase } from '../services/supabaseClient';
 
 export default function Kitchen() {
   const { sales, tables, updateOrderItemStatus, t, language, refreshSales, currentShop } = useStore();
@@ -16,6 +15,7 @@ export default function Kitchen() {
           empty: "All orders completed!",
           pending: "To Cook",
           cooking: "Cooking",
+          ready: "Ready",
           done: "Done",
           elapsed: "m",
           tap_hint: "Tap item to change status"
@@ -26,6 +26,7 @@ export default function Kitchen() {
           empty: "មិនមានការកម្ម៉ង់ទេ!",
           pending: "ចម្អិន",
           cooking: "កំពុងចម្អិន",
+          ready: "រួចហើយ",
           done: "រួចរាល់",
           elapsed: "នាទី",
           tap_hint: "ចុចលើមុខម្ហូបដើម្បីប្តូរស្ថានភាព"
@@ -34,44 +35,33 @@ export default function Kitchen() {
 
   const txt = K_TEXT[language] || K_TEXT['en'];
 
-  // Real-time listener for Sales updates
+  // Realtime updates arrive via the central shop channel in StoreContext;
+  // just make sure the ticket list is fresh when the screen opens.
   useEffect(() => {
-      if (!currentShop) return;
+      if (currentShop) refreshSales();
+  }, [currentShop?.id]);
 
-      const channel = supabase
-        .channel('kitchen-updates')
-        .on(
-          'postgres_changes',
-          { event: '*', schema: 'public', table: 'sales', filter: `shop_id=eq.${currentShop.id}` },
-          (payload) => {
-            refreshSales(); // Trigger global refresh when DB changes
-          }
-        )
-        .subscribe();
-
-      return () => {
-          supabase.removeChannel(channel);
-      };
-  }, [currentShop]);
-
-  // Filter for active orders (confirmed, cooking)
-  // We explicitly show items that are 'confirmed' (by staff) or 'cooking' (by chef).
-  // We ignore 'pending' (not sent yet) and 'served' (completed).
+  // Filter for active kitchen tickets.
+  // Show items that are 'confirmed' (queued), 'cooking', or 'ready' (waiting
+  // for pickup). Ignore 'pending' (not sent yet) and 'served' (delivered).
+  const KITCHEN_STATUSES: OrderItemStatus[] = ['confirmed', 'cooking', 'ready'];
   const activeOrders = sales
-    .filter(s => 
-        (s.orderStatus === 'pending' || s.orderStatus === 'pending_verification' || s.orderStatus === 'confirmed') && 
-        s.items.some(i => (i.status === 'confirmed' || i.status === 'cooking') && i.status !== 'cancelled')
+    .filter(s =>
+        (s.orderStatus === 'pending' || s.orderStatus === 'pending_verification' || s.orderStatus === 'confirmed') &&
+        s.items.some(i => KITCHEN_STATUSES.includes(i.status as OrderItemStatus))
     )
     .sort((a, b) => a.timestamp - b.timestamp); // FIFO: Oldest orders first
 
   const handleItemStatus = (saleId: string, itemId: string, currentStatus?: OrderItemStatus) => {
-      let nextStatus: OrderItemStatus = 'cooking'; 
-      
-      // Workflow: Confirmed -> Cooking -> Served
+      let nextStatus: OrderItemStatus = 'cooking';
+
+      // Workflow: Confirmed -> Cooking -> Ready (for pickup) -> Served
       if (!currentStatus || currentStatus === 'confirmed') {
           nextStatus = 'cooking'; // Chef starts cooking
       } else if (currentStatus === 'cooking') {
-          nextStatus = 'served'; // Chef finishes
+          nextStatus = 'ready';   // Food is ready — waiter can pick it up
+      } else if (currentStatus === 'ready') {
+          nextStatus = 'served';  // Delivered to the table
       }
 
       updateOrderItemStatus(saleId, itemId, nextStatus);
@@ -109,7 +99,7 @@ export default function Kitchen() {
                     {activeOrders.map(order => {
                         const tableName = tables.find(t => t.id === order.tableId)?.name || 'Unknown';
                         // Only show items relevant to kitchen
-                        const relevantItems = order.items.filter(i => (i.status === 'confirmed' || i.status === 'cooking') && i.status !== 'cancelled');
+                        const relevantItems = order.items.filter(i => KITCHEN_STATUSES.includes(i.status as OrderItemStatus));
                         
                         if (relevantItems.length === 0) return null;
 
@@ -133,8 +123,10 @@ export default function Kitchen() {
                                             key={item.orderItemId || idx} 
                                             onClick={() => handleItemStatus(order.id, item.orderItemId || '', item.status)}
                                             className={`p-3 rounded-lg cursor-pointer transition-all border-l-4 flex justify-between items-start ${
-                                                item.status === 'cooking' 
-                                                ? 'bg-blue-900/30 border-blue-500 hover:bg-blue-900/50' 
+                                                item.status === 'cooking'
+                                                ? 'bg-blue-900/30 border-blue-500 hover:bg-blue-900/50'
+                                                : item.status === 'ready'
+                                                ? 'bg-green-900/30 border-green-500 hover:bg-green-900/50'
                                                 : 'bg-yellow-900/20 border-yellow-500 hover:bg-yellow-900/30'
                                             }`}
                                         >
@@ -153,6 +145,10 @@ export default function Kitchen() {
                                                 {item.status === 'cooking' ? (
                                                     <div className="bg-blue-500 text-white px-2 py-1 rounded-md flex items-center gap-1 font-bold text-[10px] animate-pulse">
                                                         <Flame size={12} fill="currentColor" /> {txt.cooking}
+                                                    </div>
+                                                ) : item.status === 'ready' ? (
+                                                    <div className="bg-green-500 text-white px-2 py-1 rounded-md flex items-center gap-1 font-bold text-[10px]">
+                                                        <Bell size={12} fill="currentColor" /> {txt.ready}
                                                     </div>
                                                 ) : (
                                                     <div className="text-yellow-500 text-[10px] font-bold uppercase tracking-wider bg-yellow-500/10 px-2 py-1 rounded border border-yellow-500/50">

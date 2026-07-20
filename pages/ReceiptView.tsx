@@ -21,12 +21,13 @@ export default function ReceiptView({ sale, receiptId, onBack }: { sale?: Sale, 
         if (receiptId) {
             setLoading(true);
             try {
-                const { data: saleData, error: saleError } = await supabase
-                    .from('sales')
-                    .select('*')
-                    .eq('id', receiptId)
-                    .single();
-                
+                // SECURITY DEFINER RPC: knowing the unguessable sale id is the
+                // capability. A direct table read would be blocked by RLS for
+                // completed sales, which used to break every shared receipt link.
+                const { data: rpcData, error: saleError } = await supabase
+                    .rpc('get_receipt', { _sale_id: receiptId });
+                const saleData = Array.isArray(rpcData) ? rpcData[0] : rpcData;
+
                 if (saleError || !saleData) {
                     console.error("Sale not found", saleError);
                     setLoading(false);

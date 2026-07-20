@@ -223,7 +223,7 @@ const Navigation = ({ currentTab, setTab }: { currentTab: string, setTab: (t: st
 
 const MainContent = () => {
     const [activeTab, setActiveTab] = useState('pos');
-    const { currentShop, user, loadingAuth, activeStaff, settings, staffList, switchStaff, language, signOut, pendingWrites } = useStore();
+    const { currentShop, user, loadingAuth, activeStaff, settings, staffList, activateStaffAsOwner, language, signOut, pendingWrites } = useStore();
     const [viewMode, setViewMode] = useState<'app' | 'receipt' | 'store' | 'license' | 'manual'>('app');
     const [receiptId, setReceiptId] = useState<string | null>(null);
     const [authView, setAuthView] = useState<'landing' | 'login'>('landing');
@@ -318,15 +318,16 @@ const MainContent = () => {
 
     }, []);
 
-    // Auto-login effect for single-role mode
+    // Auto-login effect for single-role mode: the authenticated owner session
+    // is the authority, so the server activates the staff without a PIN.
     useEffect(() => {
         if (user && currentShop && !activeStaff && !settings.enableMultiRoles && staffList.length > 0) {
             const admin = staffList.find(s => s.role === 'admin') || staffList[0];
             if (admin) {
-                switchStaff(admin.pin, admin.id);
+                activateStaffAsOwner(admin.id);
             }
         }
-    }, [user, currentShop, activeStaff, settings.enableMultiRoles, staffList, switchStaff]);
+    }, [user, currentShop, activeStaff, settings.enableMultiRoles, staffList, activateStaffAsOwner]);
 
     // Force redirect to Kitchen view if user is kitchen role
     useEffect(() => {

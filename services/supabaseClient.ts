@@ -14,17 +14,22 @@ const supabaseKey =
 
 export const supabase = createClient(supabaseUrl, supabaseKey);
 
-export const setSupabaseStaffHeaders = (role?: string | null, staffId?: string | null) => {
+/**
+ * Attach (or clear) the server-minted staff session token on every REST call.
+ * The token is created by the staff_login / staff_switch / owner_activate_staff
+ * RPCs after a server-side PIN check; Postgres RLS resolves the operator's
+ * role and shop from it. Client-asserted role headers are no longer used —
+ * they were spoofable.
+ */
+export const setSupabaseStaffToken = (token?: string | null) => {
   const headers = (supabase as any).rest?.headers || {};
-  if (role) {
-    headers['x-staff-role'] = role;
+  if (token) {
+    headers['x-staff-token'] = token;
   } else {
-    delete headers['x-staff-role'];
+    delete headers['x-staff-token'];
   }
-  if (staffId) {
-    headers['x-staff-id'] = staffId;
-  } else {
-    delete headers['x-staff-id'];
-  }
+  // Clean up legacy spoofable headers if present
+  delete headers['x-staff-role'];
+  delete headers['x-staff-id'];
 };
 

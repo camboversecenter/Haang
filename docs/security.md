@@ -1,27 +1,42 @@
 # Security & Access Control
 
-Haang's security model is server-enforced: **Supabase Row-Level Security (RLS)** provides multi-tenant isolation and per-role write control, and authentication is handled by Google OAuth (owners) plus shared-device PIN login (staff).
+Haang's security model is server-enforced: **Supabase Row-Level Security (RLS)** provides multi-tenant isolation and per-role access control, and authentication is handled by Google OAuth (owners) plus **server-minted staff session tokens** (staff).
 
-## 1. Row-Level Security (RLS)
+## 1. Staff sessions (how staff identity works)
 
-Every table has RLS enabled. Data is scoped per shop, and writes are gated by role. See [user-roles.md](./user-roles.md) for the full permission matrix. Key design points:
+Staff never authenticate with client-asserted headers. Instead:
 
-- **Owner isolation** — the `is_shop_owner(shop_id)` helper grants a Supabase-authenticated owner full access only to their own shop.
-- **Staff verification** — because staff share the owner's session on one device, the active role/ID travel as custom request headers (`x-staff-role`, `x-staff-id`) and are re-verified on **every write** by `verify_staff_permission()`. A spoofed role is rejected unless a real staff row with that role exists under the shop.
-- **Secure PIN login** — `staff_login(phone, pin)` runs as a `SECURITY DEFINER` function so it can verify a PIN without exposing the whole staff table.
-- **Public reads, guarded writes** — catalog tables (products, tables, settings, payment methods, discounts) are publicly readable for QR menu browsing, but writing is role-restricted.
+1. A PIN is verified **server-side** by a `SECURITY DEFINER` RPC — `staff_login(phone, pin)` (standalone staff device) or `staff_switch(staff_id, pin)` (shared-device lock screen). PINs are **bcrypt-hashed at rest** (`trg_hash_staff_pin`); plaintext never persists and the `pin` column is excluded from client SELECT privileges.
+2. On success the server mints a row in `staff_sessions` and returns its `token` (7-day expiry). The client sends it on every request as the `x-staff-token` header.
+3. RLS resolves the operator's **role and shop from the session row** (`get_staff_session()` → `verify_staff_permission()`). An active staff session takes **precedence over the owner's auth session**, so role limits apply even on the owner's shared device. Without any staff session, the authenticated shop owner retains full access (setup flows).
+4. `owner_activate_staff(staff_id)` lets the authenticated owner activate a staff operator without a PIN (single-role auto-login). `staff_logout(token)` revokes a session; deleting a staff row cascades to its sessions.
+
+There is **no default role**: a request with no valid token and no owner session is anonymous and only reaches the public policies/RPCs below.
+
+## 2. Row-Level Security (RLS)
+
+Every table has RLS enabled. Data is scoped per shop, and both reads and writes are gated by role. See [user-roles.md](./user-roles.md) for the matrix. Key points:
+
+- **Owner isolation** — `is_shop_owner(shop_id)` grants a Supabase-authenticated owner access only to their own shop.
+- **Staff verification** — `verify_staff_permission(shop_id, roles[])` checks the *session token's* shop and role on every read/write.
+- **Kitchen constraint** — kitchen sessions can only update **active** orders, and a trigger (`trg_guard_kitchen_sales_update`) blocks them from changing money/linkage columns.
+- **Scoped reads** — sales, customers, staff, bookings, and table messages are readable **only by shop members** (plus an authenticated Google customer's own records). Catalog tables (products, tables, settings, payment methods, discounts) remain publicly readable for QR menu browsing.
+- **Public customer flows go through validated RPCs**, not open policies:
+  - `get_receipt(sale_id)` — shareable receipt links (the unguessable id is the capability).
+  - `get_table_order(shop_id, table_id)` — the open order for a physical table.
+  - `public_append_order_item` / `public_remove_order_item` — QR self-ordering. These lock the order row (no lost updates), **re-price items from the catalog** (clients cannot set prices), only touch open orders, and only let customers remove still-pending items.
+  - `public_attach_payment`, `public_link_customer`, `public_find_or_create_customer`, `public_get_order_customer` — payment proof + customer linkage without exposing the customers table.
 - **Storage** — a public `Haang` bucket holds images/receipts; uploads are restricted to image types (`png/jpg/jpeg/webp`) and non-`private` folders.
 
-The full schema and policies live in `supabase/rbac_policies.sql`.
+The full schema, policies, RPCs, and triggers live in `supabase/rbac_policies.sql` (re-runnable — run it in the SQL editor to upgrade an existing project; it hashes any legacy plaintext PINs on the spot).
 
-## 2. Authentication
+## 3. Authentication modes
 
-Two modes (see [user-roles.md](./user-roles.md) and [getting-started.md](./getting-started.md)):
+- **Shop Owner** — Google OAuth. The literal `owner_id` of the shop.
+- **Staff (shared device)** — owner stays signed in; operators switch via the Lock Screen (PIN → `staff_switch` → token). Offline switching falls back to a local SHA-256 digest of previously-used PINs and mints the real token on reconnect.
+- **Staff (standalone device)** — shop phone + 6-digit PIN via `staff_login`; the session persists locally and is re-validated with `validate_staff_session()` on startup.
 
-- **Shop Owner** — Google OAuth. The literal `owner_id` of the shop; full access via RLS.
-- **Staff** — shared-device login with the shop phone number + a 6-digit PIN, verified by the `staff_login` RPC. The active role/ID are attached to requests and checked by RLS on every write.
-
-## 3. App-Level Access Gates
+## 4. App-Level Access Gates
 
 On each load, `App.tsx` walks a short sequence of gates before showing the main app:
 
@@ -32,8 +47,8 @@ On each load, `App.tsx` walks a short sequence of gates before showing the main 
 
 ## Notes & considerations
 
-- **Staff PINs are stored in plaintext** in the `staff` table so the `staff_login` RPC can verify them. For higher assurance, hash them and compare server-side in the RPC.
 - **Payment account details** are readable publicly (they're shown on the QR menu for customers to pay) — don't store anything there that must stay private.
 - Sensitive local data cached for **offline** use (the cached Supabase responses and the queued writes in `localStorage`) currently sits in plaintext on the device. If shared/stolen-device confidentiality becomes a requirement, encrypt the local offline store at rest.
+- Staff session tokens expire after 7 days; expired sessions are pruned opportunistically on each mint.
 
 > A client-side zero-knowledge encryption module (`zk-vault`) was previously integrated as a login gate but encrypted no data, so it was removed entirely — both the integration and the standalone library. If at-rest encryption of the offline store becomes a requirement later, it should be designed around that concrete purpose rather than reinstated as a login gate.

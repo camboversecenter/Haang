@@ -215,6 +215,7 @@ export default function PublicStore() {
   const [isEditingInfo, setIsEditingInfo] = useState(false);
   const [showChat, setShowChat] = useState(false);
   const [chatMessages, setChatMessages] = useState<TableMessage[]>([]);
+  const [chatInput, setChatInput] = useState('');
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<string | null>(null);
   const [verifyingPayment, setVerifyingPayment] = useState(false);
   const [paymentProofUrl, setPaymentProofUrl] = useState<string | null>(null);
@@ -310,11 +311,11 @@ export default function PublicStore() {
               setPublicPaymentMethods(pms.map((p: any) => ({ id: p.id, shopId: p.shop_id, name: p.name, accountName: p.account_name, accountNumber: p.account_number, qrCodeUrl: p.qr_code_url, active: p.active })));
           }
 
-          // Fetch simplified sales for popularity (optional optimization: RPC call)
-          const { data: salesHistory } = await supabase.from('sales').select('items').eq('shop_id', sId).limit(100);
+          // Recent sale items for popularity badges — via SECURITY DEFINER RPC
+          // (direct public reads of the sales table are no longer allowed).
+          const { data: salesHistory } = await supabase.rpc(DB_CONSTANTS.RPC_GET_PRODUCT_POPULARITY, { _shop_id: sId });
           if (salesHistory) {
-              // Just map minimal needed
-              setPublicSales(salesHistory.map((s:any) => ({ items: typeof s.items === 'string' ? JSON.parse(s.items) : s.items } as Sale)));
+              setPublicSales((salesHistory as any[]).map((items: any) => ({ items: typeof items === 'string' ? JSON.parse(items) : items } as Sale)));
           }
 
       } catch (err) {
@@ -416,10 +417,11 @@ export default function PublicStore() {
       try {
            const publicUrl = await uploadProductImage(file, 'Haang');
            if (publicUrl) {
-               await supabase.from(DB_CONSTANTS.TABLE_SALES)
-                 .update({ payment_proof_url: publicUrl, order_status: 'pending_verification' })
-                 .eq('id', selectedHistoryOrder.id);
-               
+               const { error } = await supabase.rpc(DB_CONSTANTS.RPC_PUBLIC_ATTACH_PAYMENT, {
+                   _sale_id: selectedHistoryOrder.id, _proof_url: publicUrl
+               });
+               if (error) throw error;
+
                setCustomerHistory(prev => prev.map(s => s.id === selectedHistoryOrder.id ? { ...s, paymentProofUrl: publicUrl, orderStatus: 'pending_verification' } : s));
                setSelectedHistoryOrder(prev => prev ? { ...prev, paymentProofUrl: publicUrl, orderStatus: 'pending_verification' } : null);
                
@@ -432,23 +434,17 @@ export default function PublicStore() {
       }
   };
 
-  // Active Order Management
+  // Active Order Management (SECURITY DEFINER RPC — anonymous customers can
+  // only see the single open order of their own physical table).
   const fetchActiveOrder = async () => {
       if (!currentTableId || !shopId) return;
       setIsRefreshing(true);
-      
-      const { data } = await supabase
-        .from(DB_CONSTANTS.TABLE_SALES)
-        .select('*') 
-        .eq('shop_id', shopId)
-        .eq('table_id', currentTableId)
-        .in('order_status', ['pending', 'pending_verification', 'confirmed'])
-        .order('timestamp', { ascending: false })
-        .limit(1)
-        .maybeSingle(); 
-      
-      if (data) {
-          updateLocalOrder(data);
+
+      const { data } = await supabase.rpc(DB_CONSTANTS.RPC_GET_TABLE_ORDER, { _shop_id: shopId, _table_id: currentTableId });
+      const row = Array.isArray(data) ? data[0] : data;
+
+      if (row) {
+          updateLocalOrder(row);
       } else {
           setActiveTableOrder(null);
       }
@@ -467,24 +463,29 @@ export default function PublicStore() {
       if (currentTableId && shopId) {
           fetchActiveOrder();
 
+          // Live refresh via broadcast: RLS no longer exposes the sales table to
+          // anonymous customers, so postgres_changes would never fire here.
+          // Both the customer page and the staff apps broadcast 'table_update'
+          // on this channel after mutating the order. Staff chat replies arrive
+          // as 'chat_message' broadcasts on the same channel.
           const channel = supabase
             .channel(`public_order:${currentTableId}`)
-            .on('postgres_changes', { 
-                event: '*', 
-                schema: 'public', 
-                table: 'sales', 
-                filter: `table_id=eq.${currentTableId}` 
-            }, async (payload) => {
-                const data = payload.new as any;
-                if (payload.eventType === 'DELETE' || (data && (data.order_status === 'completed' || data.order_status === 'cancelled'))) {
-                    setActiveTableOrder(null); setPaymentProofUrl(null); setCustName(''); setCustPhone('');
-                } else if (data && ['pending', 'pending_verification', 'confirmed'].includes(data.order_status)) {
-                     updateLocalOrder(data);
-                }
-            })
             .on('broadcast', { event: 'table_update' }, ({ payload }) => {
                 if (payload.tableId === currentTableId) {
                     fetchActiveOrder();
+                }
+            })
+            .on('broadcast', { event: 'chat_message' }, ({ payload }) => {
+                if (payload.tableId === currentTableId && payload.sender === 'staff') {
+                    setChatMessages(prev => [...prev, {
+                        id: payload.id || `${Date.now()}`,
+                        shopId: shopId || '',
+                        tableId: currentTableId,
+                        sender: 'staff',
+                        message: payload.message,
+                        type: (payload.type || 'text') as TableMessage['type'],
+                        createdAt: payload.createdAt || Date.now()
+                    }]);
                 }
             })
             .subscribe();
@@ -514,23 +515,41 @@ export default function PublicStore() {
       
       setActiveTableOrder(sale);
       if(data.payment_proof_url) setPaymentProofUrl(data.payment_proof_url);
-      
+
       if (data.customer_id) {
-           const { data: cData } = await supabase.from('customers').select('name, phone').eq('id', data.customer_id).single();
+           // Customer PII is staff-only now; this RPC returns just the
+           // name/phone linked to THIS order.
+           const { data: cRows } = await supabase.rpc(DB_CONSTANTS.RPC_PUBLIC_GET_ORDER_CUSTOMER, { _sale_id: data.id });
+           const cData = Array.isArray(cRows) ? cRows[0] : cRows;
            if (cData) { setCustName(cData.name); setCustPhone(cData.phone || ''); }
       }
   };
 
   const sendLocalTableMessage = async (tableId: string, message: string, type: 'text' | 'alert_call' | 'alert_bill' | 'log') => {
       if (!shopId) return;
+      const id = generateId();
+      const createdAt = Date.now();
+      // Keep a local copy — the customer page cannot read table_messages back
+      // (RLS), so its own log/chat history lives in memory for this session.
+      setChatMessages(prev => [...prev, { id, shopId, tableId, sender: 'customer', message, type, createdAt }]);
       await supabase.from(DB_CONSTANTS.TABLE_MESSAGES).insert({
+          id,
           shop_id: shopId,
           table_id: tableId,
           sender: 'customer',
           message,
           type,
-          created_at: Date.now()
+          created_at: createdAt
       });
+  };
+
+  const handleSendChat = async () => {
+      const text = chatInput.trim();
+      if (!text || !currentTableId || sendingMsg) return;
+      setSendingMsg(true);
+      setChatInput('');
+      await sendLocalTableMessage(currentTableId, text, 'text');
+      setSendingMsg(false);
   };
 
   const handleDirectAdd = async (product: Product, variant?: any) => {
@@ -587,31 +606,22 @@ export default function PublicStore() {
           served: false
       };
 
-      const currentItems = currentOrder.items ? [...currentOrder.items] : [];
-      const existingIdx = currentItems.findIndex(i => i.id === newItem.id && i.variantId === newItem.variantId && i.status === 'pending');
-
-      if (existingIdx > -1) {
-          currentItems[existingIdx] = { ...currentItems[existingIdx], quantity: currentItems[existingIdx].quantity + 1 };
-      } else {
-          currentItems.push(newItem);
-      }
-
-      const taxRate = publicSettings?.taxRate || 0;
-      const newSubtotal = currentItems.reduce((acc, item) => acc + (item.price * item.quantity), 0);
-      const newTax = newSubtotal * (taxRate / 100);
-      const newTotal = newSubtotal + newTax;
-
-      const updatedOrder = { ...currentOrder, items: currentItems, subtotal: newSubtotal, tax: newTax, total: newTotal };
-      setActiveTableOrder(updatedOrder);
       showToast(`${t_ui.added_to_order}: ${product.name}`, "success");
       setSelectedProduct(null);
 
-      const { error } = await supabase.from(DB_CONSTANTS.TABLE_SALES).update({ items: currentItems, subtotal: newSubtotal, tax: newTax, total: newTotal }).eq('id', currentOrder.id);
+      // Server-side append: locks the order row (no lost updates when kitchen /
+      // waiter / other phones edit concurrently), re-prices the item from the
+      // catalog, and recomputes totals. Returns the authoritative row.
+      const { data: updatedRow, error } = await supabase.rpc(DB_CONSTANTS.RPC_PUBLIC_APPEND_ORDER_ITEM, {
+          _sale_id: currentOrder.id,
+          _item: newItem
+      });
 
-      if (error) {
+      if (error || !updatedRow) {
           showToast("Failed to save item", "error");
           fetchActiveOrder();
       } else {
+          updateLocalOrder(updatedRow);
           sendLocalTableMessage(currentTableId!, `[ITEM_ADDED] +1 ${newItem.name}`, 'log');
           // Broadcast update
           const channel = supabase.channel(`public_order:${currentTableId}`);
@@ -638,7 +648,10 @@ export default function PublicStore() {
           }
           const publicUrl = await uploadProductImage(file, 'Haang');
           if (publicUrl) {
-              await supabase.from(DB_CONSTANTS.TABLE_SALES).update({ payment_proof_url: publicUrl, order_status: 'pending_verification' }).eq('id', activeTableOrder.id);
+              const { error: attachError } = await supabase.rpc(DB_CONSTANTS.RPC_PUBLIC_ATTACH_PAYMENT, {
+                  _sale_id: activeTableOrder.id, _proof_url: publicUrl
+              });
+              if (attachError) throw attachError;
               setPaymentProofUrl(publicUrl);
               if (currentTableId) {
                   sendLocalTableMessage(currentTableId!, `Payment Reported via AI. ${statusMessage}`, 'alert_bill');
@@ -660,19 +673,12 @@ export default function PublicStore() {
       setSubmittingOrder(true);
 
       try {
-          // Find or create customer manually using public access
-          let custId = '';
-          const { data: existingCust } = await supabase.from('customers').select('id').eq('shop_id', shopId).eq('phone', custPhone).single();
-          
-          if (existingCust) {
-              custId = existingCust.id;
-          } else {
-              const newId = generateId();
-              await supabase.from('customers').insert({
-                  id: newId, shop_id: shopId, name: custName, phone: custPhone, email: customerUser?.email, total_debt: 0
-              });
-              custId = newId;
-          }
+          // Find-or-create the customer via SECURITY DEFINER RPC — the
+          // customers table is no longer publicly readable/writable.
+          const { data: custId, error: custError } = await supabase.rpc(DB_CONSTANTS.RPC_PUBLIC_FIND_OR_CREATE_CUSTOMER, {
+              _shop_id: shopId, _name: custName, _phone: custPhone, _email: customerUser?.email || null
+          });
+          if (custError || !custId) throw custError || new Error('Customer lookup failed');
 
           const cartTotal = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
           const taxRate = publicSettings?.taxRate || 0;
@@ -724,39 +730,47 @@ export default function PublicStore() {
       }
   };
 
-  const handleLinkCustomer = async () => { 
-      if (activeTableOrder && custName && shopId) { 
-          // Find/Create
-          let custId = '';
-          const { data: existingCust } = await supabase.from('customers').select('id').eq('shop_id', shopId).eq('phone', custPhone).single();
-          if (existingCust) custId = existingCust.id;
-          else {
-              const newId = generateId();
-              await supabase.from('customers').insert({ id: newId, shop_id: shopId, name: custName, phone: custPhone, total_debt: 0 });
-              custId = newId;
-          }
+  const handleLinkCustomer = async () => {
+      if (activeTableOrder && custName && shopId) {
+          try {
+              const { data: custId, error: custError } = await supabase.rpc(DB_CONSTANTS.RPC_PUBLIC_FIND_OR_CREATE_CUSTOMER, {
+                  _shop_id: shopId, _name: custName, _phone: custPhone, _email: customerUser?.email || null
+              });
+              if (custError || !custId) throw custError || new Error('Customer lookup failed');
 
-          await supabase.from(DB_CONSTANTS.TABLE_SALES).update({ customer_id: custId }).eq('id', activeTableOrder.id);
-          setIsEditingInfo(false); 
-          showToast(t_ui.linked_success, "success"); 
-          fetchActiveOrder();
-      } 
+              const { error: linkError } = await supabase.rpc(DB_CONSTANTS.RPC_PUBLIC_LINK_CUSTOMER, {
+                  _sale_id: activeTableOrder.id, _customer_id: custId
+              });
+              if (linkError) throw linkError;
+
+              setIsEditingInfo(false);
+              showToast(t_ui.linked_success, "success");
+              fetchActiveOrder();
+          } catch (err) {
+              console.error(err);
+              showToast("Could not link your info. Try again.", "error");
+          }
+      }
   };
 
-  const handleDeleteItem = async (itemId: string) => { 
-      if (activeTableOrder) { 
-          const confirm = await showConfirm(t_ui.remove_item, "Are you sure?"); 
-          if (confirm) { 
-              const newItems = activeTableOrder.items.filter(i => i.orderItemId !== itemId);
-              const newSub = newItems.reduce((acc, i) => acc + (i.price * i.quantity), 0);
-              const newTax = newSub * ((publicSettings?.taxRate || 0) / 100);
-              const newTot = newSub + newTax;
-              
-              await supabase.from(DB_CONSTANTS.TABLE_SALES).update({ items: newItems, subtotal: newSub, tax: newTax, total: newTot }).eq('id', activeTableOrder.id);
-              fetchActiveOrder();
-              showToast("Item removed", "success"); 
-          } 
-      } 
+  const handleDeleteItem = async (itemId: string) => {
+      if (activeTableOrder) {
+          const confirm = await showConfirm(t_ui.remove_item, "Are you sure?");
+          if (confirm) {
+              // Server-side: only still-PENDING items can be removed by the
+              // customer; items already sent to the kitchen need staff.
+              const { data: updatedRow, error } = await supabase.rpc(DB_CONSTANTS.RPC_PUBLIC_REMOVE_ORDER_ITEM, {
+                  _sale_id: activeTableOrder.id, _order_item_id: itemId
+              });
+              if (error || !updatedRow) {
+                  showToast(error?.message?.includes('kitchen') ? 'Ask staff to remove items already sent to the kitchen.' : 'Could not remove item.', "error");
+                  fetchActiveOrder();
+              } else {
+                  updateLocalOrder(updatedRow);
+                  showToast("Item removed", "success");
+              }
+          }
+      }
   };
 
   const handleCallStaff = async () => { if (currentTableId && !sendingMsg) { setSendingMsg(true); await sendLocalTableMessage(currentTableId, "Calling Staff", 'alert_call'); showToast(t_ui.calling_staff, 'success'); setSendingMsg(false); } };
@@ -1456,6 +1470,46 @@ export default function PublicStore() {
                     ))}
                 </div>
              </div>
+        </div>
+      )}
+
+      {/* Customer ↔ Staff Chat */}
+      {showChat && currentTableId && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[95] flex items-end sm:items-center justify-center sm:p-4">
+            <div className="bg-white rounded-t-3xl sm:rounded-3xl w-full max-w-md shadow-2xl flex flex-col max-h-[80vh] animate-[scale-in_0.2s_ease-out]">
+                <div className="p-4 border-b border-gray-100 flex justify-between items-center shrink-0">
+                    <h3 className="font-bold text-gray-800 flex items-center gap-2"><MessageCircle size={18} className="text-blue-500" /> {t_ui.table_chat || 'Chat with Staff'}</h3>
+                    <button onClick={() => setShowChat(false)} className="p-2 bg-gray-100 rounded-full hover:bg-gray-200"><X size={18} /></button>
+                </div>
+                <div className="flex-1 overflow-y-auto p-4 space-y-2 min-h-[200px]">
+                    {chatMessages.filter(m => m.type === 'text').length === 0 ? (
+                        <div className="text-center py-10 text-gray-400">
+                            <MessageCircle size={32} className="mx-auto mb-2 opacity-30" />
+                            <p className="text-xs">{t_ui.no_messages || 'No messages yet'}</p>
+                        </div>
+                    ) : (
+                        chatMessages.filter(m => m.type === 'text').map(msg => (
+                            <div key={msg.id} className={`flex ${msg.sender === 'customer' ? 'justify-end' : 'justify-start'}`}>
+                                <div className={`max-w-[85%] p-3 rounded-2xl text-sm ${msg.sender === 'customer' ? 'bg-brand-600 text-white rounded-br-none' : 'bg-gray-100 text-gray-800 rounded-bl-none'}`}>
+                                    {msg.message}
+                                </div>
+                            </div>
+                        ))
+                    )}
+                </div>
+                <div className="p-3 border-t border-gray-100 flex gap-2 shrink-0 pb-safe">
+                    <input
+                        className="flex-1 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-sm outline-none focus:border-brand-500"
+                        placeholder={t_ui.type_message || 'Type a message...'}
+                        value={chatInput}
+                        onChange={e => setChatInput(e.target.value)}
+                        onKeyDown={e => e.key === 'Enter' && handleSendChat()}
+                    />
+                    <button onClick={handleSendChat} disabled={!chatInput.trim() || sendingMsg} className="bg-brand-600 text-white px-4 rounded-xl disabled:opacity-50 font-bold">
+                        {sendingMsg ? <Loader2 size={18} className="animate-spin" /> : '➤'}
+                    </button>
+                </div>
+            </div>
         </div>
       )}
     </div>

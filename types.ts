@@ -36,7 +36,7 @@ export interface Product {
   variants?: ProductVariant[];
 }
 
-export type OrderItemStatus = 'pending' | 'confirmed' | 'cooking' | 'served' | 'cancelled';
+export type OrderItemStatus = 'pending' | 'confirmed' | 'cooking' | 'ready' | 'served' | 'cancelled';
 
 export interface DiscountRule {
   id: string;
@@ -151,7 +151,13 @@ export interface Staff {
   id: string;
   shopId: string;
   name: string;
-  pin: string;
+  /**
+   * Only populated transiently when creating/updating a PIN. Never returned
+   * by the server — PINs are bcrypt-hashed at rest and verified via RPC.
+   */
+  pin?: string;
+  /** Server-computed flag: does this operator have a PIN set yet? */
+  hasPin?: boolean;
   role: StaffRole;
   avatarUrl?: string;
 }

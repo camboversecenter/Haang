@@ -36,6 +36,7 @@ export default function Orders() {
   const filters = [
       { id: 'all', label: t('status.all') },
       { id: 'pending', label: t('status.pending') },
+      { id: 'confirmed', label: language === 'km' ? 'កំពុងដំណើរការ' : 'In Progress' },
       { id: 'completed', label: t('status.completed') },
       { id: 'cancelled', label: t('status.cancelled') },
       { id: 'pending_verification', label: t('status.verifying') },
@@ -73,9 +74,15 @@ export default function Orders() {
 
   const handleExport = async () => {
       setExporting(true);
-      await exportSalesData();
-      showToast(t('toast.export_success'), 'success');
-      setExporting(false);
+      try {
+          await exportSalesData();
+          showToast(t('toast.export_success'), 'success');
+      } catch (e) {
+          console.error('Export failed', e);
+          showToast(language === 'km' ? 'ការនាំចេញបរាជ័យ' : 'Export failed — try again online.', 'error');
+      } finally {
+          setExporting(false);
+      }
   };
 
   const filteredSales = sales.filter(s => {
@@ -167,10 +174,12 @@ export default function Orders() {
   const handleReject = async (saleId: string) => {
       const confirm = await showConfirm("Reject Order", "Are you sure you want to cancel this order? This cannot be undone.");
       if (confirm) {
-          await supabase.from('sales').update({ order_status: 'cancelled' }).eq('id', saleId);
+          // cancelSale is offline-safe (sync queue), updates local state (no
+          // full page reload), and restores stock when the order had already
+          // been confirmed/completed.
+          await cancelSale(saleId);
           showToast("Order cancelled", "info");
           closeOrder();
-          window.location.reload(); // Simple reload to refresh state if not using RT for this specific status change yet
       }
   };
 
@@ -231,6 +240,7 @@ export default function Orders() {
       switch(status) {
           case 'pending': return <span className="bg-orange-100 text-orange-700 px-2 py-0.5 rounded-md text-[10px] font-bold uppercase flex items-center gap-1"><Clock size={10} /> {t('status.pending')}</span>;
           case 'pending_verification': return <span className="bg-purple-100 text-purple-700 px-2 py-0.5 rounded-md text-[10px] font-bold uppercase flex items-center gap-1"><Loader2 size={10} className="animate-spin" /> {t('status.verifying')}</span>;
+          case 'confirmed': return <span className="bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-md text-[10px] font-bold uppercase flex items-center gap-1"><Clock size={10} /> {language === 'km' ? 'កំពុងដំណើរការ' : 'In Progress'}</span>;
           case 'completed': return <span className="bg-green-100 text-green-700 px-2 py-0.5 rounded-md text-[10px] font-bold uppercase flex items-center gap-1"><CheckCircle size={10} /> {t('status.completed')}</span>;
           case 'cancelled': return <span className="bg-red-100 text-red-700 px-2 py-0.5 rounded-md text-[10px] font-bold uppercase flex items-center gap-1"><XCircle size={10} /> {t('status.cancelled')}</span>;
           case 'debt': return <span className="bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded-md text-[10px] font-bold uppercase flex items-center gap-1"><AlertCircle size={10} /> {t('status.debt')}</span>;

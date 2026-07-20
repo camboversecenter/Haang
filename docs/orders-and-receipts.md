@@ -20,7 +20,7 @@ Order status lifecycle observed across the app:
 ### Verifying orders (payment verification)
 When an opened order is **pending_verification**, a panel shows the uploaded **payment proof** image with **Reject** and **Confirm & Complete** actions.
 - **Reject** sets the order to `cancelled`.
-- ⚠️ **Current behavior:** **Confirm** (`verifyOrder`) is a stub in this version — it shows a success toast and closes, but does not itself change the stored status.
+- **Confirm** (`verifyOrder`): for table orders, payment is verified and the items are sent to the kitchen (`confirmed`); for retail online orders, the sale is completed immediately and stock is decremented.
 
 ### Voiding a completed sale (with inventory restore)
 - The **Void** action appears only on completed orders and only for **Admin/Manager** (cashiers are blocked).
@@ -35,7 +35,7 @@ Add Order → **Scan** tab: photograph a paper/handwritten order; Gemini OCR ext
 ### CSV export
 An **Export CSV** button exists.
 
-⚠️ **Current behavior:** `exportSalesData` is a stub in this version — it toasts success but does not yet produce a file.
+`exportSalesData` downloads the shop's sales history (up to 5,000 rows) as a UTF-8 CSV (with BOM so Excel renders Khmer correctly), including status, payment method, totals, and an item summary per sale.
 
 ---
 

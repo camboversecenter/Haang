@@ -64,7 +64,7 @@ docs/                # Detailed feature & role documentation
 - **State hub:** `store/StoreContext.tsx` holds nearly all app state and business logic (products, cart, sales, customers, staff, tables, discounts, etc.) and the i18n dictionary (`TRANSLATIONS`) with `t(key)`. Most features call `useStore()`. UI helpers (`showToast`, `showConfirm`) come from `useUI()`.
 - **Data mapping:** the DB uses `snake_case`; the app uses `camelCase`. Mapping happens manually in `StoreContext` (e.g. `image_url` ↔ `imageUrl`, `track_stock` ↔ `trackStock`). Keep this in sync when adding fields.
 - **Routing** is hash-based in `App.tsx`: `#/s/{shopId}` (public store), `#/r/{saleId}` (public receipt), plus legacy `?mode=` params. There is no router library.
-- **Roles & access:** two auth modes (Google **owner**, or shared-device **staff** via shop phone + 6-digit PIN). Five roles: `admin, manager, cashier, waiter, kitchen`. The active staff role/id are sent as `x-staff-role` / `x-staff-id` headers (`setSupabaseStaffHeaders`) and verified by Postgres RLS on every write. See `docs/user-roles.md` and `supabase/rbac_policies.sql`.
+- **Roles & access:** two auth modes (Google **owner**, or **staff** via shop phone + 6-digit PIN). Five roles: `admin, manager, cashier, waiter, kitchen`. Staff identity is a **server-minted session token** (`x-staff-token` header, set via `setSupabaseStaffToken`) created only after a server-side PIN check; Postgres RLS resolves role/shop from `staff_sessions` on every request and an active staff session outranks the owner session. PINs are bcrypt-hashed at rest. See `docs/user-roles.md`, `docs/security.md`, and `supabase/rbac_policies.sql`.
 - **Security:** server-enforced via Supabase RLS (see `supabase/rbac_policies.sql` and `docs/security.md`). A client-side zero-knowledge vault was previously integrated as a login gate but encrypted no data, so it was removed entirely (both the integration and the standalone library).
 - **Offline:** the app is offline-capable (see `docs/getting-started.md`). Reads are served from the service-worker cache; writes go through `services/syncQueue.ts` (`dbWrite`), which queues to localStorage when offline and replays FIFO on reconnect. Prefer `dbWrite` over raw `supabase.from().insert/update/delete` for new mutations.
 - **AI:** never call Gemini directly from the client. Add new AI capabilities as an `action` in `supabase/functions/gemini-api/index.ts` and a wrapper in `services/geminiService.ts`.
@@ -83,11 +83,10 @@ docs/                # Detailed feature & role documentation
 
 These are real in the current code (documented with ⚠️ notes in `docs/`):
 
-- **Stub functions in `StoreContext.tsx`:** `verifyOrder`, `exportSalesData`, `repayDebt`, and the product-activity functions (`getProductActivities`/`fetchMoreActivities`/`hasMoreActivities`) are stubs. Their UIs show success toasts but the underlying operation is not implemented.
-- **Checkout totals:** `checkout` persists `tax: 0` and a total based on **undiscounted** prices, so stored/receipt totals can differ from what the POS displays.
-- **PIN length:** Settings creates 6-digit PINs (default `123456`); the Login staff-PIN field now accepts 6 digits to match (previously capped at 4).
-- **Public store chat:** the customer-side chat/activity-log state is never populated (Call/Bill alerts do work).
+- **Product activity log is a stub:** `getProductActivities`/`fetchMoreActivities`/`hasMoreActivities` return empty data, so the Inventory Activity tab always shows its empty state. (The other former stubs — `verifyOrder`, `exportSalesData`, `repayDebt`, `findOrCreateCustomer` — are now implemented.)
 - **No delete-product button** exists in the Inventory UI.
+- **Realtime for standalone staff logins:** staff authenticated via phone+PIN (no Supabase auth session) receive live updates via broadcast only; `postgres_changes` events don't reach them because Realtime authorizes with the socket's JWT, not the staff token. Owner-session devices get both.
+- **Schema upgrades:** after pulling changes to `supabase/rbac_policies.sql`, re-run that file in the Supabase SQL editor (it is idempotent and migrates data, e.g. hashing legacy plaintext PINs).
 
 If you fix any of these, update the corresponding ⚠️ note in `docs/`.
 
