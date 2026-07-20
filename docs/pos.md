@@ -67,7 +67,7 @@ On confirm, `checkout(method, customerId?)`:
 3. Persists stock changes and the sale to Supabase.
 4. Clears the cart and shows a **receipt success screen** (an inline [ReceiptView](./orders-and-receipts.md)) with a "Start new" button.
 
-⚠️ **Current behavior:** the persisted sale records `tax: 0` and a total based on **undiscounted** item prices, so the stored/receipt total can differ from the VAT- and discount-adjusted figures shown during checkout. Treat this as a known gap between the POS display and the saved record.
+The persisted sale stores exactly what the POS displays: the **discounted** subtotal (per-item best rule), the configured VAT/tax, the resulting total, and each item's `appliedDiscount` — so receipts and dashboard discount metrics match the checkout screen. Credit sales are stored with `orderStatus: 'debt'` and tracked on the customer's ledger until repaid.
 
 ## Related
 - Configure discounts and payment methods in [Settings](./settings.md).

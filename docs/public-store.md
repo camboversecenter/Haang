@@ -50,4 +50,4 @@ These arrive on the staff [Tables](./tables-and-bookings.md) screen as CALL / BI
 
 Public orders are written to the shared `sales` table (with `tableId` for restaurants or `customerId` for retail). Staff surfaces pick them up in realtime — the [Kitchen](./kitchen.md) board shows confirmed items, and the [Tables](./tables-and-bookings.md) screen shows each table's active order and alerts.
 
-⚠️ **Current behavior:** the customer-side **chat view / activity log** is incomplete in this version — the chat message state is never populated and no chat modal is rendered, even though the Call/Bill alerts (which staff do receive) work.
+The customer-side **chat** works end-to-end: the Chat button opens a modal, customer messages are stored in `table_messages` (staff see them in the table detail), and staff replies are delivered live to the customer page via realtime broadcast (the messages table itself is staff-only under RLS). The **activity log** fills with order events from the current session.

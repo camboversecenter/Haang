@@ -15,7 +15,7 @@ Haang supports two distinct **authentication modes** and a **five-role permissio
 ### 2. Staff (Shared-Device / PIN)
 - Used on shared terminals where several employees operate one device that is authenticated as the owner.
 - A staff member logs in with the **shop phone number + a 6-digit PIN** (`staff_login` DB function), or switches on the lock screen.
-- The active staff member's role and ID are attached to every database request as secure custom headers (`x-staff-role`, `x-staff-id`), which the RLS helper functions (`get_active_staff_role()`, `verify_staff_permission()`) verify on **every write** to prevent privilege escalation.
+- The active staff member is identified by a **server-minted session token** (`x-staff-token` header), created only after a server-side PIN check (`staff_login` / `staff_switch`) or explicit owner authorization (`owner_activate_staff`). RLS resolves the operator's role and shop from the `staff_sessions` table on **every request** — client-asserted role headers are never trusted, and an active staff session takes precedence over the owner's own auth session. See [security.md](./security.md).
 - Multi-role mode is toggled by the **"Multi-Staff / Roles"** setting (`enableMultiRoles`). When off, the app auto-logs-in as the admin/first staff member for a single-operator experience.
 
 > **Default admin:** A new shop can create an admin with **PIN `123456`** from the lock screen. PINs are **6 digits**.

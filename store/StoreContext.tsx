@@ -640,11 +640,24 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       if (error) { console.error('updateStaff failed', error); throw error; }
       if (updates.pin) await seedPinCache(id, updates.pin);
       setStaffList(prev => prev.map(s => s.id === id ? { ...s, ...updates, pin: undefined, hasPin: updates.pin ? true : s.hasPin } : s));
+      // Keep the live operator in sync — a role downgrade applies immediately.
+      // (The server session still carries the old role until re-login, so force
+      // a fresh session when the role changed.)
+      if (activeStaff?.id === id) {
+          if (updates.role && updates.role !== activeStaff.role) {
+              logoutStaff();
+          } else {
+              setActiveStaff(prev => prev && prev.id === id ? { ...prev, ...updates, pin: undefined } as Staff : prev);
+          }
+      }
   };
   const deleteStaff = async (id: string) => {
       const { error } = await supabase.from(DB_CONSTANTS.TABLE_STAFF).delete().eq('id', id);
       if (error) { console.error('deleteStaff failed', error); throw error; }
       setStaffList(prev => prev.filter(s => s.id !== id));
+      // A deleted operator must not keep an active session on this device.
+      // (Server-side, deleting the staff row already cascades its sessions.)
+      if (activeStaff?.id === id) logoutStaff();
   };
 
   const addProduct = async (product: Partial<Product>) => {
@@ -1007,21 +1020,38 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
   const updateSettings = async (updates: Partial<Settings>) => {
       if (!currentShop) return;
-      await supabase.from(DB_CONSTANTS.TABLE_SETTINGS).update({
+      const { error } = await supabase.from(DB_CONSTANTS.TABLE_SETTINGS).update({
           tax_rate: updates.taxRate, enable_public_store: updates.enablePublicStore,
           enable_booking: updates.enableBooking, enable_attributes: updates.enableAttributes,
           enable_multi_roles: updates.enableMultiRoles, default_language: updates.defaultLanguage
       }).eq('shop_id', currentShop.id);
+      if (error) { console.error('updateSettings failed', error); throw error; }
       setSettingsState(prev => ({ ...prev, ...updates }));
   };
   const updateShop = async (updates: Partial<Shop>) => {
       if (!currentShop) return;
-      await supabase.from(DB_CONSTANTS.TABLE_SHOPS).update({ name: updates.name, address: updates.address, phone: updates.phone, logo_url: updates.logoUrl, type: updates.type }).eq('id', currentShop.id);
+      const { error } = await supabase.from(DB_CONSTANTS.TABLE_SHOPS).update({ name: updates.name, address: updates.address, phone: updates.phone, logo_url: updates.logoUrl, type: updates.type }).eq('id', currentShop.id);
+      if (error) { console.error('updateShop failed', error); throw error; }
       setCurrentShop(prev => prev ? { ...prev, ...updates } : null);
   };
 
-  const fetchMoreSales = async () => {};
-  const hasMoreSales = false;
+  const SALES_PAGE_SIZE = 50;
+  const [hasMoreSales, setHasMoreSales] = useState(true);
+  const fetchMoreSales = async () => {
+      if (!currentShop) return;
+      const { data, error } = await supabase.from(DB_CONSTANTS.TABLE_SALES)
+          .select('*').eq('shop_id', currentShop.id)
+          .order('timestamp', { ascending: false })
+          .range(sales.length, sales.length + SALES_PAGE_SIZE - 1);
+      if (error || !data) return;
+      if (data.length < SALES_PAGE_SIZE) setHasMoreSales(false);
+      if (data.length > 0) {
+          setSales(prev => {
+              const known = new Set(prev.map(s => s.id));
+              return [...prev, ...data.filter((r: any) => !known.has(r.id)).map(mapSaleRow)];
+          });
+      }
+  };
   /**
    * Staff verification of a customer's submitted payment (order_status
    * 'pending_verification').
@@ -1116,7 +1146,42 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
           .order('timestamp', { ascending: false }).limit(50);
       if (!error && data) setSales(data.map(mapSaleRow));
   };
-  const exportSalesData = async () => {};
+  /**
+   * Export the shop's full sales history as a CSV download (previously a stub
+   * whose button toasted success while producing nothing).
+   */
+  const exportSalesData = async () => {
+      if (!currentShop) return;
+      const { data, error } = await supabase.from(DB_CONSTANTS.TABLE_SALES)
+          .select('*').eq('shop_id', currentShop.id)
+          .order('timestamp', { ascending: false }).limit(5000);
+      if (error || !data) throw error || new Error('Export failed');
+
+      const esc = (v: any) => {
+          const s = v === null || v === undefined ? '' : String(v);
+          return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+      };
+      const header = ['id', 'date', 'status', 'payment_method', 'subtotal', 'tax', 'total', 'currency', 'table_id', 'customer_id', 'items'];
+      const rows = data.map((s: any) => {
+          const items = typeof s.items === 'string' ? JSON.parse(s.items) : (s.items || []);
+          const itemSummary = items.map((i: any) => `${i.quantity}x ${i.name}${i.variantName ? ` (${i.variantName})` : ''}`).join('; ');
+          return [
+              s.id, new Date(Number(s.timestamp)).toISOString(), s.order_status, s.payment_method,
+              s.subtotal, s.tax, s.total, s.currency, s.table_id || '', s.customer_id || '', itemSummary
+          ].map(esc).join(',');
+      });
+      const csv = '﻿' + [header.join(','), ...rows].join('\n'); // BOM so Excel opens Khmer text correctly
+
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `sales-${currentShop.name.replace(/[^\w-]+/g, '_')}-${new Date().toISOString().slice(0, 10)}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+  };
 
   const addExpense = async (expense: Partial<Expense>) => {
       if (!currentShop) return;

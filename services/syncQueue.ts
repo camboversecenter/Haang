@@ -17,6 +17,17 @@ export type QueuedOp = {
   payload?: any;
   match?: Record<string, any>;
   ts: number;
+  /**
+   * Staff session token active when the write was authored. Replays are sent
+   * under THIS token (not whoever is active at flush time), so RLS attributes
+   * the write to the right operator.
+   */
+  staffToken?: string | null;
+};
+
+const currentStaffToken = (): string | null => {
+  const headers = (supabase as any).rest?.headers || {};
+  return headers['x-staff-token'] || null;
 };
 
 const STORAGE_KEY = 'haang_sync_queue_v1';
@@ -75,21 +86,36 @@ function isNetworkError(e: any): boolean {
 }
 
 async function applyOp(op: QueuedOp): Promise<void> {
-  const table = supabase.from(op.table);
-  let res: any;
-  if (op.action === 'insert') {
-    res = await table.upsert(op.payload); // idempotent replay via primary key
-  } else if (op.action === 'update') {
-    res = await table.update(op.payload).match(op.match || {});
-  } else if (op.action === 'delete') {
-    res = await table.delete().match(op.match || {});
+  // Replay under the authoring operator's session token, then restore.
+  const headers = (supabase as any).rest?.headers || {};
+  const prevToken = headers['x-staff-token'];
+  const overrideToken = op.staffToken !== undefined;
+  if (overrideToken) {
+    if (op.staffToken) headers['x-staff-token'] = op.staffToken;
+    else delete headers['x-staff-token'];
   }
-  if (res && res.error) throw res.error;
+  try {
+    const table = supabase.from(op.table);
+    let res: any;
+    if (op.action === 'insert') {
+      res = await table.upsert(op.payload); // idempotent replay via primary key
+    } else if (op.action === 'update') {
+      res = await table.update(op.payload).match(op.match || {});
+    } else if (op.action === 'delete') {
+      res = await table.delete().match(op.match || {});
+    }
+    if (res && res.error) throw res.error;
+  } finally {
+    if (overrideToken) {
+      if (prevToken) headers['x-staff-token'] = prevToken;
+      else delete headers['x-staff-token'];
+    }
+  }
 }
 
 function enqueue(op: Omit<QueuedOp, 'id' | 'ts'>) {
   const q = load();
-  q.push({ ...op, id: genId(), ts: Date.now() });
+  q.push({ staffToken: currentStaffToken(), ...op, id: genId(), ts: Date.now() });
   save(q);
 }
 

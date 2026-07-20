@@ -74,9 +74,15 @@ export default function Orders() {
 
   const handleExport = async () => {
       setExporting(true);
-      await exportSalesData();
-      showToast(t('toast.export_success'), 'success');
-      setExporting(false);
+      try {
+          await exportSalesData();
+          showToast(t('toast.export_success'), 'success');
+      } catch (e) {
+          console.error('Export failed', e);
+          showToast(language === 'km' ? 'ការនាំចេញបរាជ័យ' : 'Export failed — try again online.', 'error');
+      } finally {
+          setExporting(false);
+      }
   };
 
   const filteredSales = sales.filter(s => {

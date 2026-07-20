@@ -27,7 +27,7 @@ The Customers screen (`pages/Customers.tsx`) is a lightweight CRM focused on the
 - A **Pay Debt** button appears on any customer with `totalDebt > 0`.
 - The repay modal shows the current debt and takes an amount (in Riel); `repayDebt(customerId, amount)` records the payment.
 
-⚠️ **Current behavior:** `repayDebt` is a stub in this version — the UI records a payment and toasts success, but the underlying balance update is not yet implemented. Treat debt figures as driven by credit sales until this is wired up.
+Recording a repayment reduces the customer's `total_debt` ledger and settles their **oldest fully-covered** `debt` sales to `completed` (at which point those sales start counting as dashboard revenue). Credit sales at the POS create the debt: they are stored with `orderStatus: 'debt'` and increment the ledger.
 
 ## Purchase & payment history
 

@@ -7,7 +7,7 @@ import { generateLogo } from '../services/geminiService';
 import { Staff, StaffRole, DiscountRule, DiscountType, PaymentMethod } from '../types';
 
 export default function Settings() {
-  const { settings, updateSettings, updateShop, currentShop, t, language, signOut, staffList, addStaff, updateStaff, deleteStaff, discountRules, addDiscountRule, deleteDiscountRule, categories, products, setLanguage, paymentMethods, addPaymentMethod, updatePaymentMethod, deletePaymentMethod, connectPrinter, printerConnected } = useStore();
+  const { settings, updateSettings, updateShop, currentShop, t, language, signOut, staffList, addStaff, updateStaff, deleteStaff, discountRules, addDiscountRule, deleteDiscountRule, categories, products, setLanguage, paymentMethods, addPaymentMethod, updatePaymentMethod, deletePaymentMethod, connectPrinter, printerConnected, activeStaff } = useStore();
   const { showToast, showAlert, showConfirm } = useUI();
   
   const [activeTab, setActiveTab] = useState<'general' | 'staff' | 'discounts' | 'payments' | 'hardware'>('general');
@@ -381,9 +381,13 @@ export default function Settings() {
             <div className="flex p-1 bg-white border border-gray-200 rounded-xl w-full max-w-2xl overflow-x-auto no-scrollbar">
                 {[
                     { id: 'general', label: t('set.general') },
-                    { id: 'staff', label: t('set.staff') },
-                    { id: 'discounts', label: t('set.discounts') },
-                    { id: 'payments', label: t('set.payments') },
+                    // Staff, discounts, and payment methods are admin-only server-side
+                    // (RLS) — don't offer managers tabs whose saves would be rejected.
+                    ...(activeStaff?.role !== 'manager' ? [
+                        { id: 'staff', label: t('set.staff') },
+                        { id: 'discounts', label: t('set.discounts') },
+                        { id: 'payments', label: t('set.payments') },
+                    ] : []),
                     { id: 'hardware', label: t('set.hardware') }
                 ].map(tab => (
                     <button 
