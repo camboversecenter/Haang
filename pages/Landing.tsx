@@ -34,7 +34,7 @@ export default function Landing({ onGetStarted }: LandingProps) {
     { icon: Sparkles, title: tx('AI Assistant', 'ជំនួយការ AI'), desc: tx('AI writes product descriptions, generates images, scans receipts, and gives business tips.', 'AI សរសេរបរិយាយទំនិញ បង្កើតរូបភាព ស្កេនវិក្កយបត្រ និងផ្តល់គន្លឹះអាជីវកម្ម។') },
     { icon: WifiOff, title: tx('Works Offline', 'ដំណើរការក្រៅបណ្តាញ'), desc: tx('Keep selling when the internet drops. Installable as an app on any phone.', 'បន្តលក់ បើទោះជាអ៊ីនធឺណិតដាច់។ ដំឡើងជាកម្មវិធីលើទូរស័ព្ទណាក៏បាន។') },
     { icon: Users, title: tx('Staff & Roles', 'បុគ្គលិក និងតួនាទី'), desc: tx('Admin, Manager, Cashier, Waiter, and Kitchen roles with secure 6-digit PIN login.', 'តួនាទី Admin, អ្នកគ្រប់គ្រង, អ្នកគិតលុយ, អ្នករត់តុ និងផ្ទះបាយ ជាមួយ PIN ៦ ខ្ទង់។') },
-    { icon: ShieldCheck, title: tx('Secure by Design', 'សុវត្ថិភាពខ្ពស់'), desc: tx('Zero-knowledge vault with passkeys keeps your sensitive data encrypted end-to-end.', 'ប្រព័ន្ធអ៊ិនគ្រីប Zero-knowledge ជាមួយ Passkey ការពារទិន្នន័យសំខាន់ៗរបស់អ្នក។') },
+    { icon: ShieldCheck, title: tx('Secure by Design', 'សុវត្ថិភាពខ្ពស់'), desc: tx('Google sign-in, server-enforced access rules, and role-based staff PINs keep your business data protected.', 'ចូលដោយ Google ច្បាប់សិទ្ធិចូលប្រើនៅលើម៉ាស៊ីនមេ និង PIN តាមតួនាទី ការពារទិន្នន័យអាជីវកម្មរបស់អ្នក។') },
   ];
 
   const steps = [

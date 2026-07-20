@@ -34,7 +34,7 @@ DROP FUNCTION IF EXISTS public.staff_login CASCADE;
 DROP FUNCTION IF EXISTS public.is_shop_owner CASCADE;
 
 DROP TABLE IF EXISTS public.payment_methods CASCADE;
-DROP TABLE IF EXISTS public.vault_envelopes CASCADE;
+DROP TABLE IF EXISTS public.vault_envelopes CASCADE; -- legacy: zero-knowledge vault removed, drop orphaned table
 DROP TABLE IF EXISTS public.table_messages CASCADE;
 DROP TABLE IF EXISTS public.discount_rules CASCADE;
 DROP TABLE IF EXISTS public.product_activities CASCADE;
@@ -228,17 +228,6 @@ create table public.payment_methods (
 );
 alter table public.payment_methods enable row level security;
 
--- 14. VAULT ENVELOPES (Zero-Knowledge End-to-End Cryptographic Vault)
-create table public.vault_envelopes (
-  user_id uuid primary key default auth.uid(),
-  created_at timestamp with time zone default timezone('utc'::text, now()) not null,
-  vault_envelope_pin text,
-  vault_pin_salt text,
-  vault_envelope_passkey text,
-  passkey_id text
-);
-alter table public.vault_envelopes enable row level security;
-
 -- ==========================================
 -- 3. ROW LEVEL SECURITY (RLS) POLICIES
 -- ==========================================
@@ -321,9 +310,6 @@ create policy "Owner manage messages" on public.table_messages for all using (pu
 -- PAYMENT METHODS: Public Read
 create policy "Public read payments" on public.payment_methods for select using (true);
 create policy "Owner manage payments" on public.payment_methods for all using (public.is_shop_owner(shop_id));
-
--- VAULT ENVELOPES: Authenticated User Level access only (zero leak E2EE)
-create policy "Users can manage their own vault" on public.vault_envelopes for all using (auth.uid() = user_id);
 
 -- ==========================================
 -- 4. SECURE FUNCTIONS

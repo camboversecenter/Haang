@@ -127,9 +127,9 @@ export default function Login({ onBack }: { onBack?: () => void } = {}) {
                              <KeyRound className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
                              <input 
                                 className="w-full pl-10 pr-4 py-3.5 bg-gray-50 rounded-xl border-2 border-transparent focus:border-brand-500 focus:bg-white transition-all outline-none font-bold text-gray-800 tracking-widest"
-                                placeholder="****"
+                                placeholder="******"
                                 type="password"
-                                maxLength={4}
+                                maxLength={6}
                                 inputMode="numeric"
                                 value={staffPin}
                                 onChange={e => setStaffPin(e.target.value)}

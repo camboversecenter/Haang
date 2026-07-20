@@ -85,7 +85,7 @@ These are real in the current code (documented with ⚠️ notes in `docs/`):
 
 - **Stub functions in `StoreContext.tsx`:** `verifyOrder`, `exportSalesData`, `repayDebt`, and the product-activity functions (`getProductActivities`/`fetchMoreActivities`/`hasMoreActivities`) are stubs. Their UIs show success toasts but the underlying operation is not implemented.
 - **Checkout totals:** `checkout` persists `tax: 0` and a total based on **undiscounted** prices, so stored/receipt totals can differ from what the POS displays.
-- **PIN length inconsistency:** Settings creates 6-digit PINs (default `123456`), but the Login staff-PIN field is capped at 4 characters.
+- **PIN length:** Settings creates 6-digit PINs (default `123456`); the Login staff-PIN field now accepts 6 digits to match (previously capped at 4).
 - **Public store chat:** the customer-side chat/activity-log state is never populated (Call/Bill alerts do work).
 - **No delete-product button** exists in the Inventory UI.
 

@@ -11,7 +11,7 @@ Haang has two ways to sign in (see [user-roles.md](./user-roles.md) for full det
 
 The login screen (`pages/Login.tsx`) has two tabs — **Owner** and **Staff** — plus links to the User Manual and Community License, and a "Free Forever" notice.
 
-⚠️ **Current behavior:** the Login staff-PIN field is capped at 4 characters, while staff PINs are created as 6 digits in Settings and the default admin PIN is `123456`. This is a known inconsistency in the source.
+The Login staff-PIN field accepts a 6-digit PIN, matching the PINs created in Settings (the default admin PIN is `123456`).
 
 ## First-time shop setup
 
