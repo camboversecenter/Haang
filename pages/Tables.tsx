@@ -24,6 +24,8 @@ export default function Tables() {
   const [viewingTableId, setViewingTableId] = useState<string | null>(null);
   const [detailTab, setDetailTab] = useState<'order' | 'log'>('order');
   const [viewProofModal, setViewProofModal] = useState<string | null>(null);
+  // Finish flow: which sale/table is being closed, pending a payment method choice
+  const [finishingOrder, setFinishingOrder] = useState<{ saleId: string; tableId: string; total: number } | null>(null);
 
   const [messages, setMessages] = useState<TableMessage[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -208,23 +210,21 @@ export default function Tables() {
 
   const handleVerifyPayment = async () => {
       if (!selectedTableOrder) return;
-      await confirmOrderItems(selectedTableOrder.id); 
-      if (selectedTableOrder.orderStatus === 'pending_verification') {
-           await supabase.from('sales').update({ order_status: 'confirmed' }).eq('id', selectedTableOrder.id);
-      }
+      // confirmOrderItems also flips order_status to 'confirmed' (offline-safe).
+      await confirmOrderItems(selectedTableOrder.id);
       showToast(language === 'km' ? "បានផ្ទៀងផ្ទាត់ការបង់ប្រាក់" : "Payment Verified & Order Confirmed", "success");
   };
 
   const handleFinishOrder = async () => {
       if (!selectedTableOrder || !viewingTableId) return;
-      
+
       if (isRestaurant) {
           const hasPending = selectedTableOrder.items.some(i => i.status === 'pending');
           const hasUnserved = selectedTableOrder.items.some(i => i.status !== 'served');
           let msg = language === 'km' ? "បញ្ចប់ការលក់និងសម្អាតតុ?" : "Finish order and clear table?";
           if (hasPending) msg = language === 'km' ? "ព្រមាន៖ មានមុខម្ហូបខ្លះមិនទាន់ធ្វើ..." : "Warning: Some items are still pending. Finish anyway?";
           else if (hasUnserved) msg = language === 'km' ? "ព្រមាន៖ មុខម្ហូបខ្លះមិនទាន់លើកជូន..." : "Warning: Some items are not marked served. Finish anyway?";
-    
+
           const confirm = await showConfirm(language === 'km' ? "បញ្ចប់ការលក់" : "Finish Order", msg);
           if (!confirm) return;
       } else {
@@ -232,12 +232,20 @@ export default function Tables() {
           if (!confirm) return;
       }
 
-      const tableIdToClear = viewingTableId; 
+      // Ask how the customer paid before closing out — the payment method is
+      // recorded on the completed sale.
+      setFinishingOrder({ saleId: selectedTableOrder.id, tableId: viewingTableId, total: selectedTableOrder.total });
+  };
+
+  const handleCompleteFinish = async (paymentMethod: string) => {
+      if (!finishingOrder) return;
+      const { saleId, tableId } = finishingOrder;
+      setFinishingOrder(null);
       setSelectedTableOrder(null);
       setReplyText('');
-      setMessages(prev => prev.filter(m => m.tableId !== tableIdToClear)); 
+      setMessages(prev => prev.filter(m => m.tableId !== tableId));
       setViewingTableId(null);
-      await finishTableOrder(selectedTableOrder.id, tableIdToClear);
+      await finishTableOrder(saleId, tableId, paymentMethod);
       showToast(language === 'km' ? "ការលក់ជោគជ័យ" : "Order completed", "success");
   };
 
@@ -718,6 +726,29 @@ export default function Tables() {
                             <div className="p-4 space-y-4">{/* Log View */}</div>
                         )}
                     </div>
+                </div>
+            </div>
+        )}
+
+        {finishingOrder && (
+            <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[80] flex items-center justify-center p-6">
+                <div className="bg-white rounded-3xl w-full max-w-xs shadow-2xl p-6 animate-[scale-in_0.2s_ease-out]">
+                    <h3 className="font-bold text-lg text-gray-800 mb-1">{language === 'km' ? 'វិធីបង់ប្រាក់' : 'Payment Method'}</h3>
+                    <p className="text-sm text-gray-500 mb-4">{language === 'km' ? 'តើអតិថិជនបង់ប្រាក់តាមរបៀបណា?' : 'How did the customer pay?'} <span className="font-bold text-brand-600">{formatPrice(finishingOrder.total)}</span></p>
+                    <div className="space-y-2">
+                        <button onClick={() => handleCompleteFinish('cash')} className="w-full py-3 bg-green-50 hover:bg-green-100 border border-green-200 text-green-800 rounded-xl font-bold transition-colors">
+                            💵 {language === 'km' ? 'សាច់ប្រាក់' : 'Cash'}
+                        </button>
+                        <button onClick={() => handleCompleteFinish('khqr')} className="w-full py-3 bg-red-50 hover:bg-red-100 border border-red-200 text-red-800 rounded-xl font-bold transition-colors">
+                            <span className="font-mono">KHQR</span> {language === 'km' ? '/ ផ្ទេរប្រាក់' : '/ Transfer'}
+                        </button>
+                        <button onClick={() => handleCompleteFinish('card')} className="w-full py-3 bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-800 rounded-xl font-bold transition-colors">
+                            💳 {language === 'km' ? 'កាត' : 'Card'}
+                        </button>
+                    </div>
+                    <button onClick={() => setFinishingOrder(null)} className="w-full mt-3 py-2 text-gray-400 hover:text-gray-600 text-sm font-bold">
+                        {language === 'km' ? 'បោះបង់' : 'Cancel'}
+                    </button>
                 </div>
             </div>
         )}

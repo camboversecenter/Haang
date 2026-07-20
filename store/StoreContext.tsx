@@ -118,8 +118,8 @@ interface StoreContextType {
   updateTable: (id: string, updates: Partial<Table>) => Promise<void>;
   addBooking: (booking: any) => Promise<void>;
   startTableSession: (tableId: string) => Promise<void>;
-  finishTableOrder: (saleId: string, tableId: string) => Promise<void>;
-  confirmOrderItems: (saleId: string, tableId: string) => Promise<void>;
+  finishTableOrder: (saleId: string, tableId: string, paymentMethod?: string) => Promise<void>;
+  confirmOrderItems: (saleId: string) => Promise<void>;
   updateOrderItemStatus: (saleId: string, itemId: string, status: OrderItemStatus) => Promise<void>;
   removeItemFromOrder: (saleId: string, itemId: string) => Promise<void>;
   
@@ -756,20 +756,14 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       return { finalPrice: bestPrice, discountAmount, rule: appliedRule };
   };
 
-  const checkout = (method: string, customerId?: string) => {
-      if (!currentShop) return null;
-      const total = cart.reduce((acc, item) => acc + (item.price * item.quantity), 0);
-      const sale: Sale = {
-          id: generateId(),
-          shopId: currentShop.id,
-          timestamp: Date.now(),
-          total, subtotal: total, tax: 0, paymentMethod: method, orderStatus: 'completed',
-          items: cart, currency: settings.currency, exchangeRate: settings.exchangeRate, customerId
-      };
-
-      // Decrement product stock inside local state and database
+  /**
+   * Decrement stock for every tracked item in a sale, both in local state and
+   * (offline-safely) in the database. Shared by retail checkout, manual sales,
+   * online-order verification, and dine-in order completion.
+   */
+  const applyStockDecrement = (items: CartItem[]) => {
       const updatedProducts = products.map(p => {
-          const cartItemsForProduct = cart.filter(item => item.id === p.id);
+          const cartItemsForProduct = items.filter(item => item.id === p.id);
           if (cartItemsForProduct.length === 0) return p;
           if (p.trackStock === false) return p;
 
@@ -790,11 +784,7 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
               }
           });
 
-          return {
-              ...p,
-              stock: newStock,
-              variants: newVariants
-          };
+          return { ...p, stock: newStock, variants: newVariants };
       });
 
       setProducts(updatedProducts);
@@ -807,6 +797,67 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
               dbWrite({ table: DB_CONSTANTS.TABLE_PRODUCTS, action: 'update', payload: { stock: p.stock, variants: p.variants }, match: { id: p.id } });
           }
       });
+  };
+
+  /**
+   * Notify the customer QR page of this table that its order changed. The
+   * customer page cannot read the sales table (RLS), so it listens for
+   * 'table_update' broadcasts and refetches via RPC.
+   */
+  const broadcastTableUpdate = (tableId?: string | null) => {
+      if (!tableId) return;
+      try {
+          const topic = `public_order:${tableId}`;
+          const ch = supabase.channel(topic);
+          ch.subscribe((status: string) => {
+              if (status === 'SUBSCRIBED') {
+                  ch.send({ type: 'broadcast', event: 'table_update', payload: { tableId } })
+                    .then(() => { supabase.removeChannel(ch); }, () => { supabase.removeChannel(ch); });
+              }
+          });
+      } catch { /* non-critical */ }
+  };
+
+  const checkout = (method: string, customerId?: string) => {
+      if (!currentShop) return null;
+      if (cart.length === 0) return null;
+
+      // Apply the exact discount math the POS displays, so the stored sale
+      // matches what the cashier and customer saw on screen.
+      const itemsWithDiscounts: CartItem[] = cart.map(item => {
+          const { finalPrice, discountAmount, rule } = getBestDiscountForItem(item, customerId);
+          return {
+              ...item,
+              finalPrice,
+              discountAmount,
+              appliedDiscount: rule ? { name: rule.name, amountSaved: discountAmount } : undefined
+          };
+      });
+
+      const subtotal = itemsWithDiscounts.reduce((sum, i) => sum + ((i.finalPrice ?? i.price) * i.quantity), 0);
+      const tax = subtotal * ((settings.taxRate || 0) / 100);
+      const total = subtotal + tax;
+      const isCredit = method === 'credit';
+
+      const sale: Sale = {
+          id: generateId(),
+          shopId: currentShop.id,
+          timestamp: Date.now(),
+          total, subtotal, tax, paymentMethod: method,
+          // Credit sales are tracked as open debt until repaid (see repayDebt).
+          orderStatus: isCredit ? 'debt' : 'completed',
+          items: itemsWithDiscounts, currency: settings.currency, exchangeRate: settings.exchangeRate, customerId
+      };
+
+      applyStockDecrement(itemsWithDiscounts);
+
+      // Credit: record the amount on the customer's debt ledger
+      if (isCredit && customerId) {
+          const customer = customers.find(c => c.id === customerId);
+          const newDebt = (customer?.totalDebt || 0) + total;
+          setCustomers(prev => prev.map(c => c.id === customerId ? { ...c, totalDebt: newDebt } : c));
+          dbWrite({ table: DB_CONSTANTS.TABLE_CUSTOMERS, action: 'update', payload: { total_debt: newDebt }, match: { id: customerId } });
+      }
 
       setSales(prev => [sale, ...prev]);
       clearCart();
@@ -819,45 +870,7 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   };
 
   const addManualSale = async (sale: Sale) => {
-      // Decrement product stock inside local state and database for manual sales addition too
-      const updatedProducts = products.map(p => {
-          const cartItemsForProduct = sale.items.filter(item => item.id === p.id);
-          if (cartItemsForProduct.length === 0) return p;
-          if (p.trackStock === false) return p;
-
-          let newStock = p.stock || 0;
-          let newVariants = p.variants ? [...p.variants] : undefined;
-
-          cartItemsForProduct.forEach(item => {
-              if (item.variantId && newVariants) {
-                  newVariants = newVariants.map(v => {
-                      if (v.id === item.variantId) {
-                          return { ...v, stock: Math.max(0, (v.stock || 0) - item.quantity) };
-                      }
-                      return v;
-                  });
-                  newStock = newVariants.reduce((sum, v) => sum + (v.stock || 0), 0);
-              } else {
-                  newStock = Math.max(0, newStock - item.quantity);
-              }
-          });
-
-          return {
-              ...p,
-              stock: newStock,
-              variants: newVariants
-          };
-      });
-
-      setProducts(updatedProducts);
-
-      updatedProducts.forEach((p) => {
-          const originalProduct = products.find(op => op.id === p.id);
-          if (!originalProduct) return;
-          if (originalProduct.stock !== p.stock || JSON.stringify(originalProduct.variants) !== JSON.stringify(p.variants)) {
-              dbWrite({ table: DB_CONSTANTS.TABLE_PRODUCTS, action: 'update', payload: { stock: p.stock, variants: p.variants }, match: { id: p.id } });
-          }
-      });
+      applyStockDecrement(sale.items);
 
       setSales(prev => [sale, ...prev]);
       await dbWrite({ table: DB_CONSTANTS.TABLE_SALES, action: 'insert', payload: {
@@ -875,11 +888,61 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       return id;
   };
   const updateCustomer = async (id: string, updates: Partial<Customer>) => {
-      await dbWrite({ table: DB_CONSTANTS.TABLE_CUSTOMERS, action: 'update', payload: updates, match: { id } });
+      // Map camelCase → snake_case for the DB payload
+      const payload: any = {};
+      if (updates.name !== undefined) payload.name = updates.name;
+      if (updates.phone !== undefined) payload.phone = updates.phone;
+      if (updates.email !== undefined) payload.email = updates.email;
+      if (updates.totalDebt !== undefined) payload.total_debt = updates.totalDebt;
+      if (updates.lastInteraction !== undefined) payload.last_interaction = updates.lastInteraction;
+      await dbWrite({ table: DB_CONSTANTS.TABLE_CUSTOMERS, action: 'update', payload, match: { id } });
       setCustomers(prev => prev.map(c => c.id === id ? { ...c, ...updates } : c));
   };
-  const repayDebt = async (cid: string, amount: number) => { };
-  const findOrCreateCustomer = async (phone: string, name?: string) => null;
+
+  /**
+   * Record a debt repayment: reduce the customer's ledger and settle their
+   * oldest open 'debt' sales (fully-covered ones flip to 'completed', which is
+   * when they start counting as dashboard revenue).
+   */
+  const repayDebt = async (cid: string, amount: number) => {
+      const customer = customers.find(c => c.id === cid);
+      if (!customer || !(amount > 0)) return;
+
+      const newDebt = Math.max(0, (customer.totalDebt || 0) - amount);
+
+      let remaining = amount;
+      const settledIds: string[] = [];
+      const debtSales = sales
+          .filter(s => s.customerId === cid && s.orderStatus === 'debt')
+          .sort((a, b) => a.timestamp - b.timestamp);
+      for (const s of debtSales) {
+          if (remaining >= s.total) {
+              remaining -= s.total;
+              settledIds.push(s.id);
+          } else {
+              break;
+          }
+      }
+
+      if (settledIds.length > 0) {
+          setSales(prev => prev.map(s => settledIds.includes(s.id) ? { ...s, orderStatus: 'completed' } : s));
+          for (const sid of settledIds) {
+              await dbWrite({ table: DB_CONSTANTS.TABLE_SALES, action: 'update', payload: { order_status: 'completed' }, match: { id: sid } });
+          }
+      }
+
+      setCustomers(prev => prev.map(c => c.id === cid ? { ...c, totalDebt: newDebt, lastInteraction: Date.now() } : c));
+      await dbWrite({ table: DB_CONSTANTS.TABLE_CUSTOMERS, action: 'update', payload: { total_debt: newDebt, last_interaction: Date.now() }, match: { id: cid } });
+  };
+
+  const findOrCreateCustomer = async (phone: string, name?: string): Promise<Customer | null> => {
+      if (!phone || !currentShop) return null;
+      const existing = customers.find(c => c.phone === phone);
+      if (existing) return existing;
+      const id = await addCustomer(name || 'Customer', phone);
+      if (!id) return null;
+      return { id, shopId: currentShop.id, name: name || 'Customer', phone, totalDebt: 0, lastInteraction: Date.now() };
+  };
 
   const addTable = async (name: string, capacity: number) => {
       if (!currentShop) return;
@@ -921,7 +984,26 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
   const fetchMoreSales = async () => {};
   const hasMoreSales = false;
-  const verifyOrder = async (id: string) => {};
+  /**
+   * Staff verification of a customer's submitted payment (order_status
+   * 'pending_verification').
+   *  - Table orders: payment is verified → send items to the kitchen
+   *    ('confirmed'); the sale completes when the table is finished.
+   *  - Retail online orders: complete the sale now and decrement stock.
+   */
+  const verifyOrder = async (id: string) => {
+      const sale = sales.find(s => s.id === id);
+      if (!sale) return;
+
+      if (sale.tableId) {
+          await confirmOrderItems(id);
+      } else {
+          applyStockDecrement(sale.items);
+          setSales(prev => prev.map(s => s.id === id ? { ...s, orderStatus: 'completed', paymentMethod: 'khqr' } : s));
+          await dbWrite({ table: DB_CONSTANTS.TABLE_SALES, action: 'update', payload: { order_status: 'completed', payment_method: 'khqr' }, match: { id } });
+      }
+      broadcastTableUpdate(sale.tableId);
+  };
   
   const cancelSale = async (id: string) => {
       try {
@@ -1100,7 +1182,22 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const printReceipt = async (s: Sale) => { if (currentShop) await printer.printReceipt(s, currentShop); };
   
   const startTableSession = async (tid: string) => { updateTable(tid, { status: 'occupied', allowOrdering: true }); };
-  const finishTableOrder = async (sid: string, tid: string) => { updateTable(tid, { status: 'available', allowOrdering: false }); };
+  /**
+   * Close out a dine-in order: record the payment method, mark the sale
+   * 'completed' (it now counts as revenue), decrement stock for its items,
+   * then free the table. Previously this only freed the table, so restaurant
+   * sales never completed and never appeared in the dashboard.
+   */
+  const finishTableOrder = async (sid: string, tid: string, paymentMethod: string = 'cash') => {
+      const sale = sales.find(s => s.id === sid);
+      if (sale && sale.orderStatus !== 'completed' && sale.orderStatus !== 'cancelled') {
+          applyStockDecrement(sale.items);
+          setSales(prev => prev.map(s => s.id === sid ? { ...s, orderStatus: 'completed', paymentMethod } : s));
+          await dbWrite({ table: DB_CONSTANTS.TABLE_SALES, action: 'update', payload: { order_status: 'completed', payment_method: paymentMethod }, match: { id: sid } });
+          broadcastTableUpdate(tid);
+      }
+      updateTable(tid, { status: 'available', allowOrdering: false });
+  };
   const confirmOrderItems = async (sid: string) => {
       const sale = sales.find(s => s.id === sid);
       if (!sale) return;

@@ -167,10 +167,12 @@ export default function Orders() {
   const handleReject = async (saleId: string) => {
       const confirm = await showConfirm("Reject Order", "Are you sure you want to cancel this order? This cannot be undone.");
       if (confirm) {
-          await supabase.from('sales').update({ order_status: 'cancelled' }).eq('id', saleId);
+          // cancelSale is offline-safe (sync queue), updates local state (no
+          // full page reload), and restores stock when the order had already
+          // been confirmed/completed.
+          await cancelSale(saleId);
           showToast("Order cancelled", "info");
           closeOrder();
-          window.location.reload(); // Simple reload to refresh state if not using RT for this specific status change yet
       }
   };
 
