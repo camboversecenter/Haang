@@ -215,6 +215,7 @@ export default function PublicStore() {
   const [isEditingInfo, setIsEditingInfo] = useState(false);
   const [showChat, setShowChat] = useState(false);
   const [chatMessages, setChatMessages] = useState<TableMessage[]>([]);
+  const [chatInput, setChatInput] = useState('');
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<string | null>(null);
   const [verifyingPayment, setVerifyingPayment] = useState(false);
   const [paymentProofUrl, setPaymentProofUrl] = useState<string | null>(null);
@@ -465,12 +466,26 @@ export default function PublicStore() {
           // Live refresh via broadcast: RLS no longer exposes the sales table to
           // anonymous customers, so postgres_changes would never fire here.
           // Both the customer page and the staff apps broadcast 'table_update'
-          // on this channel after mutating the order.
+          // on this channel after mutating the order. Staff chat replies arrive
+          // as 'chat_message' broadcasts on the same channel.
           const channel = supabase
             .channel(`public_order:${currentTableId}`)
             .on('broadcast', { event: 'table_update' }, ({ payload }) => {
                 if (payload.tableId === currentTableId) {
                     fetchActiveOrder();
+                }
+            })
+            .on('broadcast', { event: 'chat_message' }, ({ payload }) => {
+                if (payload.tableId === currentTableId && payload.sender === 'staff') {
+                    setChatMessages(prev => [...prev, {
+                        id: payload.id || `${Date.now()}`,
+                        shopId: shopId || '',
+                        tableId: currentTableId,
+                        sender: 'staff',
+                        message: payload.message,
+                        type: (payload.type || 'text') as TableMessage['type'],
+                        createdAt: payload.createdAt || Date.now()
+                    }]);
                 }
             })
             .subscribe();
@@ -512,14 +527,29 @@ export default function PublicStore() {
 
   const sendLocalTableMessage = async (tableId: string, message: string, type: 'text' | 'alert_call' | 'alert_bill' | 'log') => {
       if (!shopId) return;
+      const id = generateId();
+      const createdAt = Date.now();
+      // Keep a local copy — the customer page cannot read table_messages back
+      // (RLS), so its own log/chat history lives in memory for this session.
+      setChatMessages(prev => [...prev, { id, shopId, tableId, sender: 'customer', message, type, createdAt }]);
       await supabase.from(DB_CONSTANTS.TABLE_MESSAGES).insert({
+          id,
           shop_id: shopId,
           table_id: tableId,
           sender: 'customer',
           message,
           type,
-          created_at: Date.now()
+          created_at: createdAt
       });
+  };
+
+  const handleSendChat = async () => {
+      const text = chatInput.trim();
+      if (!text || !currentTableId || sendingMsg) return;
+      setSendingMsg(true);
+      setChatInput('');
+      await sendLocalTableMessage(currentTableId, text, 'text');
+      setSendingMsg(false);
   };
 
   const handleDirectAdd = async (product: Product, variant?: any) => {
@@ -1440,6 +1470,46 @@ export default function PublicStore() {
                     ))}
                 </div>
              </div>
+        </div>
+      )}
+
+      {/* Customer ↔ Staff Chat */}
+      {showChat && currentTableId && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[95] flex items-end sm:items-center justify-center sm:p-4">
+            <div className="bg-white rounded-t-3xl sm:rounded-3xl w-full max-w-md shadow-2xl flex flex-col max-h-[80vh] animate-[scale-in_0.2s_ease-out]">
+                <div className="p-4 border-b border-gray-100 flex justify-between items-center shrink-0">
+                    <h3 className="font-bold text-gray-800 flex items-center gap-2"><MessageCircle size={18} className="text-blue-500" /> {t_ui.table_chat || 'Chat with Staff'}</h3>
+                    <button onClick={() => setShowChat(false)} className="p-2 bg-gray-100 rounded-full hover:bg-gray-200"><X size={18} /></button>
+                </div>
+                <div className="flex-1 overflow-y-auto p-4 space-y-2 min-h-[200px]">
+                    {chatMessages.filter(m => m.type === 'text').length === 0 ? (
+                        <div className="text-center py-10 text-gray-400">
+                            <MessageCircle size={32} className="mx-auto mb-2 opacity-30" />
+                            <p className="text-xs">{t_ui.no_messages || 'No messages yet'}</p>
+                        </div>
+                    ) : (
+                        chatMessages.filter(m => m.type === 'text').map(msg => (
+                            <div key={msg.id} className={`flex ${msg.sender === 'customer' ? 'justify-end' : 'justify-start'}`}>
+                                <div className={`max-w-[85%] p-3 rounded-2xl text-sm ${msg.sender === 'customer' ? 'bg-brand-600 text-white rounded-br-none' : 'bg-gray-100 text-gray-800 rounded-bl-none'}`}>
+                                    {msg.message}
+                                </div>
+                            </div>
+                        ))
+                    )}
+                </div>
+                <div className="p-3 border-t border-gray-100 flex gap-2 shrink-0 pb-safe">
+                    <input
+                        className="flex-1 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-sm outline-none focus:border-brand-500"
+                        placeholder={t_ui.type_message || 'Type a message...'}
+                        value={chatInput}
+                        onChange={e => setChatInput(e.target.value)}
+                        onKeyDown={e => e.key === 'Enter' && handleSendChat()}
+                    />
+                    <button onClick={handleSendChat} disabled={!chatInput.trim() || sendingMsg} className="bg-brand-600 text-white px-4 rounded-xl disabled:opacity-50 font-bold">
+                        {sendingMsg ? <Loader2 size={18} className="animate-spin" /> : '➤'}
+                    </button>
+                </div>
+            </div>
         </div>
       )}
     </div>

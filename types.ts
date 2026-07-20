@@ -36,7 +36,7 @@ export interface Product {
   variants?: ProductVariant[];
 }
 
-export type OrderItemStatus = 'pending' | 'confirmed' | 'cooking' | 'served' | 'cancelled';
+export type OrderItemStatus = 'pending' | 'confirmed' | 'cooking' | 'ready' | 'served' | 'cancelled';
 
 export interface DiscountRule {
   id: string;

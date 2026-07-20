@@ -7,9 +7,10 @@ import ReactQRCode from 'react-qr-code';
 import { consultBookingAgent } from '../services/geminiService';
 import { Sale, TableMessage, Table, OrderItemStatus } from '../types';
 import { supabase } from '../services/supabaseClient';
+import { sendTableChatBroadcast } from '../services/shopBus';
 
 export default function Tables() {
-  const { tables, bookings, addTable, updateTable, addBooking, settings, updateSettings, t, language, currentShop, sales, formatPrice, updateOrderItemStatus, removeItemFromOrder, confirmOrderItems, finishTableOrder, startTableSession, refreshSales } = useStore();
+  const { tables, bookings, addTable, updateTable, addBooking, deleteBooking, settings, updateSettings, t, language, currentShop, sales, formatPrice, updateOrderItemStatus, removeItemFromOrder, confirmOrderItems, finishTableOrder, startTableSession, refreshSales } = useStore();
   const { showToast, showConfirm } = useUI();
   
   const [activeTab, setActiveTab] = useState<'layout' | 'schedule'>('layout');
@@ -51,25 +52,11 @@ export default function Tables() {
       return () => clearInterval(interval);
   }, []);
 
-  // Keep sales fresh so orders placed via table QR appear for staff in real time.
+  // Realtime sales updates arrive via the central shop channel in
+  // StoreContext; just make sure the list is fresh when the screen opens.
   useEffect(() => {
-      if (!currentShop) return;
-      refreshSales();
-
-      const channel = supabase
-        .channel('staff_table_sales')
-        .on('postgres_changes', {
-            event: '*',
-            schema: 'public',
-            table: 'sales',
-            filter: `shop_id=eq.${currentShop.id}`
-        }, () => {
-            refreshSales();
-        })
-        .subscribe();
-
-      return () => { supabase.removeChannel(channel); };
-  }, [currentShop]);
+      if (currentShop) refreshSales();
+  }, [currentShop?.id]);
 
   // Reflect refreshed sales in the currently open table order modal.
   useEffect(() => {
@@ -169,9 +156,15 @@ export default function Tables() {
 
   const handleSendReply = async () => {
       if (!replyText.trim() || !viewingTableId || !currentShop) return;
-      const payload = { shop_id: currentShop.id, table_id: viewingTableId, sender: 'staff', message: replyText, type: 'text', created_at: Date.now() };
+      const id = `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+      const payload = { id, shop_id: currentShop.id, table_id: viewingTableId, sender: 'staff', message: replyText, type: 'text', created_at: Date.now() };
       const { error } = await supabase.from('table_messages').insert(payload);
-      if (!error) { setReplyText(''); } else { console.error(error); }
+      if (!error) {
+          // Deliver to the customer's QR page (it cannot read table_messages
+          // under RLS — chat reaches it via broadcast).
+          sendTableChatBroadcast(viewingTableId, { id, sender: 'staff', message: replyText, type: 'text', createdAt: payload.created_at });
+          setReplyText('');
+      } else { console.error(error); }
   };
 
   const handleToggleOrdering = async (e: React.MouseEvent, table: Table) => {
@@ -256,7 +249,9 @@ export default function Tables() {
   const getStatusColor = (status?: string) => {
       switch(status) {
           case 'served': return 'bg-green-100 text-green-700';
-          case 'confirmed': return 'bg-blue-100 text-blue-700';
+          case 'ready': return 'bg-emerald-100 text-emerald-700 animate-pulse';
+          case 'cooking': return 'bg-blue-100 text-blue-700 animate-pulse';
+          case 'confirmed': return 'bg-indigo-100 text-indigo-700';
           case 'pending': return 'bg-orange-100 text-orange-700 animate-pulse';
           default: return 'bg-gray-100 text-gray-500';
       }
@@ -445,7 +440,10 @@ export default function Tables() {
                         {filteredTables.map(table => {
                             const activeOrder = sales.find(s => s.tableId === table.id && s.orderStatus !== 'completed' && s.orderStatus !== 'cancelled');
                             const pendingCount = activeOrder?.items.filter(i => !i.status || i.status === 'pending').length || 0;
-                            const cookingCount = activeOrder?.items.filter(i => i.status === 'confirmed').length || 0;
+                            // In the kitchen = queued ('confirmed') or actively cooking
+                            const cookingCount = activeOrder?.items.filter(i => i.status === 'confirmed' || i.status === 'cooking').length || 0;
+                            // Ready for pickup — the waiter's cue to collect the food
+                            const readyCount = activeOrder?.items.filter(i => i.status === 'ready').length || 0;
                             
                             const alerts = getTableAlerts(table.id);
                             const hasCall = alerts.some(m => m.type === 'alert_call');
@@ -506,6 +504,7 @@ export default function Tables() {
                                                 <div className="flex gap-2 text-[10px] font-bold">
                                                     {pendingCount > 0 && <span className="bg-orange-50 text-orange-700 px-2 py-1 rounded-md flex-1 text-center border border-orange-100">{pendingCount} Pending</span>}
                                                     {cookingCount > 0 && <span className="bg-blue-50 text-blue-700 px-2 py-1 rounded-md flex-1 text-center border border-blue-100">{cookingCount} Cooking</span>}
+                                                    {readyCount > 0 && <span className="bg-emerald-50 text-emerald-700 px-2 py-1 rounded-md flex-1 text-center border border-emerald-100 animate-pulse">{readyCount} Ready</span>}
                                                 </div>
                                             )}
                                         </div>
@@ -613,6 +612,17 @@ export default function Tables() {
                                                          <Info size={16} />
                                                      </a>
                                                  )}
+                                                 <button
+                                                     onClick={async (e) => {
+                                                         e.stopPropagation();
+                                                         const ok = await showConfirm(language === 'km' ? 'លុបការកក់' : 'Cancel Booking', language === 'km' ? 'តើអ្នកច្បាស់ទេថាចង់លុបការកក់នេះ?' : `Cancel ${booking.customerName}'s booking?`);
+                                                         if (ok) { await deleteBooking(booking.id); showToast(language === 'km' ? 'បានលុបការកក់' : 'Booking cancelled', 'info'); }
+                                                     }}
+                                                     className="p-2 bg-red-50 text-red-500 rounded-lg hover:bg-red-100"
+                                                     title={language === 'km' ? 'លុបការកក់' : 'Cancel booking'}
+                                                 >
+                                                     <Trash2 size={16} />
+                                                 </button>
                                              </div>
                                          </div>
                                      ))

@@ -9,12 +9,14 @@ import { Sale, Product, ProductVariant, Customer } from '../types';
 import ReceiptView from './ReceiptView';
 
 export default function POS() {
-  const { products, cart, addToCart, updateCartQuantity, removeFromCart, checkout, t, language, clearCart, currentShop, settings, formatPrice, customers, addCustomer, getBestDiscountForItem } = useStore();
+  const { products, cart, addToCart, updateCartQuantity, removeFromCart, checkout, t, language, clearCart, currentShop, settings, formatPrice, customers, addCustomer, getBestDiscountForItem, paymentMethods } = useStore();
   const { showToast, showConfirm } = useUI();
   const [search, setSearch] = useState('');
   const [showCheckout, setShowCheckout] = useState(false);
   const [isMobileCartOpen, setIsMobileCartOpen] = useState(false);
   const [showScanner, setShowScanner] = useState(false);
+  // KHQR payment step: show the configured merchant QR for the customer to scan
+  const [khqrModalMethod, setKhqrModalMethod] = useState<import('../types').PaymentMethod | null>(null);
   
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [isAddingCustomer, setIsAddingCustomer] = useState(false);
@@ -590,9 +592,16 @@ export default function POS() {
                             <ChevronUp className="rotate-90 text-gray-300 group-hover:text-green-500" />
                         </button>
                         
-                        <button 
+                        <button
                             type="button"
-                            onClick={() => handleCheckout('khqr')}
+                            onClick={() => {
+                                // Show the shop's configured KHQR/bank QR so the
+                                // customer can actually scan it at the register;
+                                // fall back to direct completion if none is set up.
+                                const method = paymentMethods.find(pm => pm.active && pm.qrCodeUrl);
+                                if (method) setKhqrModalMethod(method);
+                                else handleCheckout('khqr');
+                            }}
                             className="group w-full flex items-center justify-between p-4 border-2 border-transparent bg-gray-50 hover:bg-white hover:border-red-500 rounded-2xl transition-all shadow-sm active:scale-[0.98]"
                         >
                              <div className="flex items-center gap-4">
@@ -721,10 +730,34 @@ export default function POS() {
 
       {/* Barcode Scanner Overlay */}
       {showScanner && (
-          <BarcodeScanner 
+          <BarcodeScanner
               onScan={handleScan}
               onClose={() => setShowScanner(false)}
           />
+      )}
+
+      {/* KHQR Merchant QR — customer scans, cashier confirms */}
+      {khqrModalMethod && (
+          <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-[90] flex items-center justify-center p-4">
+              <div className="bg-white rounded-3xl w-full max-w-sm shadow-2xl p-6 text-center animate-[scale-in_0.2s_ease-out]">
+                  <div className="flex justify-between items-center mb-4">
+                      <h3 className="font-bold text-lg text-gray-800">{khqrModalMethod.name}</h3>
+                      <button onClick={() => setKhqrModalMethod(null)} className="p-2 bg-gray-100 rounded-full hover:bg-gray-200"><X size={18} /></button>
+                  </div>
+                  <img src={khqrModalMethod.qrCodeUrl} alt="Payment QR" className="w-56 h-56 object-contain mx-auto rounded-2xl border border-gray-100 shadow-inner bg-white" />
+                  {(khqrModalMethod.accountName || khqrModalMethod.accountNumber) && (
+                      <p className="text-xs text-gray-500 mt-3 font-medium">{khqrModalMethod.accountName} {khqrModalMethod.accountNumber ? `· ${khqrModalMethod.accountNumber}` : ''}</p>
+                  )}
+                  <p className="text-2xl font-black text-brand-600 mt-3">{formatPrice(cartTotal)}</p>
+                  <p className="text-xs text-gray-400 mt-1">{language === 'km' ? 'អតិថិជនស្កេន QR ដើម្បីបង់ប្រាក់' : 'Customer scans the QR to pay'}</p>
+                  <button
+                      onClick={() => { setKhqrModalMethod(null); handleCheckout('khqr'); }}
+                      className="w-full mt-5 py-3.5 bg-brand-600 hover:bg-brand-700 text-white rounded-2xl font-bold shadow-lg shadow-brand-200 active:scale-95 transition-all flex items-center justify-center gap-2"
+                  >
+                      <CheckCircle size={18} /> {language === 'km' ? 'ទទួលបានប្រាក់ — បញ្ចប់' : 'Payment received — Complete'}
+                  </button>
+              </div>
+          </div>
       )}
     </div>
   );

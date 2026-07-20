@@ -3,6 +3,7 @@ import { supabase, setSupabaseStaffToken } from '../services/supabaseClient';
 import { DB_CONSTANTS } from '../services/supabaseSchema';
 import { printer } from '../services/printerService';
 import { dbWrite, initSync, onQueueChange, getQueueLength } from '../services/syncQueue';
+import { notifyShopDataChanged, notifyTableOrderChanged } from '../services/shopBus';
 import { 
   Shop, Product, CartItem, Sale, Customer, Staff, Settings, 
   Booking, Table, ProductActivity, DiscountRule, PaymentMethod, 
@@ -117,6 +118,8 @@ interface StoreContextType {
   addTable: (name: string, capacity: number) => Promise<void>;
   updateTable: (id: string, updates: Partial<Table>) => Promise<void>;
   addBooking: (booking: any) => Promise<void>;
+  updateBooking: (id: string, updates: Partial<Booking>) => Promise<void>;
+  deleteBooking: (id: string) => Promise<void>;
   startTableSession: (tableId: string) => Promise<void>;
   finishTableOrder: (saleId: string, tableId: string, paymentMethod?: string) => Promise<void>;
   confirmOrderItems: (saleId: string) => Promise<void>;
@@ -362,6 +365,30 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
           return true;
       }
   };
+
+  // Central realtime: one shop-wide channel keeps EVERY staff screen (POS,
+  // Orders, Tables, Kitchen, Dashboard) in sync without per-page subscriptions.
+  //  - broadcast 'data_changed': sent by staff devices and the customer QR page
+  //    after any order mutation (works regardless of RLS / auth mode)
+  //  - postgres_changes on sales: extra safety net for owner-authenticated
+  //    devices (fires even if a writer forgot to broadcast)
+  useEffect(() => {
+      if (!currentShop) return;
+      let timer: ReturnType<typeof setTimeout> | null = null;
+      const throttledRefresh = () => {
+          if (timer) return;
+          timer = setTimeout(() => { timer = null; refreshSales(); }, 800);
+      };
+      const channel = supabase
+          .channel(`haang-shop:${currentShop.id}`)
+          .on('broadcast', { event: 'data_changed' }, throttledRefresh)
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'sales', filter: `shop_id=eq.${currentShop.id}` }, throttledRefresh)
+          .subscribe();
+      return () => {
+          if (timer) clearTimeout(timer);
+          supabase.removeChannel(channel);
+      };
+  }, [currentShop?.id]);
 
   // Offline staff activation leaves us without a server session token. Once the
   // owner-authenticated device is back online, mint the real token silently.
@@ -800,22 +827,14 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   };
 
   /**
-   * Notify the customer QR page of this table that its order changed. The
-   * customer page cannot read the sales table (RLS), so it listens for
-   * 'table_update' broadcasts and refetches via RPC.
+   * Notify everyone affected by an order change: the customer QR page of the
+   * table (if any) and all other staff devices of this shop. The customer page
+   * cannot read the sales table (RLS), so it listens for broadcasts and
+   * refetches via RPC.
    */
   const broadcastTableUpdate = (tableId?: string | null) => {
-      if (!tableId) return;
-      try {
-          const topic = `public_order:${tableId}`;
-          const ch = supabase.channel(topic);
-          ch.subscribe((status: string) => {
-              if (status === 'SUBSCRIBED') {
-                  ch.send({ type: 'broadcast', event: 'table_update', payload: { tableId } })
-                    .then(() => { supabase.removeChannel(ch); }, () => { supabase.removeChannel(ch); });
-              }
-          });
-      } catch { /* non-critical */ }
+      notifyTableOrderChanged(tableId);
+      notifyShopDataChanged(currentShop?.id);
   };
 
   const checkout = (method: string, customerId?: string) => {
@@ -866,6 +885,7 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
           subtotal: sale.subtotal, tax: sale.tax, payment_method: sale.paymentMethod, order_status: sale.orderStatus,
           items: sale.items, currency: sale.currency, exchange_rate: sale.exchangeRate, customer_id: sale.customerId
       }});
+      notifyShopDataChanged(currentShop.id);
       return sale;
   };
 
@@ -878,6 +898,7 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
           subtotal: sale.subtotal, tax: sale.tax, payment_method: sale.paymentMethod, order_status: sale.orderStatus,
           items: sale.items, currency: sale.currency, exchange_rate: sale.exchangeRate
       }});
+      notifyShopDataChanged(sale.shopId);
   };
 
   const addCustomer = async (name: string, phone?: string, email?: string) => {
@@ -967,6 +988,23 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       setBookings(prev => [...prev, { ...booking, id, shopId: currentShop.id }]);
   };
 
+  const updateBooking = async (id: string, updates: Partial<Booking>) => {
+      const payload: any = {};
+      if (updates.customerName !== undefined) payload.customer_name = updates.customerName;
+      if (updates.phone !== undefined) payload.phone = updates.phone;
+      if (updates.time !== undefined) payload.time = updates.time;
+      if (updates.guests !== undefined) payload.guests = updates.guests;
+      if (updates.tableId !== undefined) payload.table_id = updates.tableId;
+      if (updates.notes !== undefined) payload.notes = updates.notes;
+      await dbWrite({ table: DB_CONSTANTS.TABLE_BOOKINGS, action: 'update', payload, match: { id } });
+      setBookings(prev => prev.map(b => b.id === id ? { ...b, ...updates } : b));
+  };
+
+  const deleteBooking = async (id: string) => {
+      await dbWrite({ table: DB_CONSTANTS.TABLE_BOOKINGS, action: 'delete', match: { id } });
+      setBookings(prev => prev.filter(b => b.id !== id));
+  };
+
   const updateSettings = async (updates: Partial<Settings>) => {
       if (!currentShop) return;
       await supabase.from(DB_CONSTANTS.TABLE_SETTINGS).update({
@@ -1014,8 +1052,10 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
           setSales(prev => prev.map(s => s.id === id ? { ...s, orderStatus: 'cancelled' } : s));
 
-          // If voiding/cancelling a previously valid order, restore product stock
-          if (saleToCancel.orderStatus === 'completed' || saleToCancel.orderStatus === 'confirmed') {
+          // If voiding a previously FINALIZED order, restore product stock.
+          // ('confirmed' dine-in orders never decremented stock — it is taken
+          // at completion — so restoring for them would create phantom stock.)
+          if (saleToCancel.orderStatus === 'completed' || saleToCancel.orderStatus === 'debt') {
               const updatedProducts = products.map(p => {
                   const itemsForProduct = saleToCancel.items.filter(item => item.id === p.id);
                   if (itemsForProduct.length === 0) return p;
@@ -1055,11 +1095,12 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
                   }
               }
           }
+          broadcastTableUpdate(saleToCancel.tableId);
       } catch (err) {
           console.error("Failed to cancel sale:", err);
       }
   };
-  
+
   const mapSaleRow = (s: any): Sale => ({
       id: s.id, shopId: s.shop_id, timestamp: s.timestamp, total: Number(s.total), subtotal: Number(s.subtotal),
       tax: Number(s.tax), paymentMethod: s.payment_method, orderStatus: s.order_status,
@@ -1207,6 +1248,7 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       );
       setSales(prev => prev.map(s => s.id === sid ? { ...s, items: updatedItems, orderStatus: 'confirmed' } : s));
       await dbWrite({ table: DB_CONSTANTS.TABLE_SALES, action: 'update', payload: { items: updatedItems, order_status: 'confirmed' }, match: { id: sid } });
+      broadcastTableUpdate(sale.tableId);
   };
 
   const updateOrderItemStatus = async (sid: string, iid: string, st: OrderItemStatus) => {
@@ -1217,6 +1259,7 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       );
       setSales(prev => prev.map(s => s.id === sid ? { ...s, items: updatedItems } : s));
       await dbWrite({ table: DB_CONSTANTS.TABLE_SALES, action: 'update', payload: { items: updatedItems }, match: { id: sid } });
+      broadcastTableUpdate(sale.tableId);
   };
 
   const removeItemFromOrder = async (sid: string, iid: string) => {
@@ -1228,6 +1271,7 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       const total = subtotal + tax;
       setSales(prev => prev.map(s => s.id === sid ? { ...s, items: updatedItems, subtotal, tax, total } : s));
       await dbWrite({ table: DB_CONSTANTS.TABLE_SALES, action: 'update', payload: { items: updatedItems, subtotal, tax, total }, match: { id: sid } });
+      broadcastTableUpdate(sale.tableId);
   };
 
   const categories = useMemo(() => {
@@ -1251,7 +1295,7 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       cart, addToCart, removeFromCart, updateCartQuantity, clearCart, checkout, addManualSale, getBestDiscountForItem,
       sales, fetchMoreSales, hasMoreSales, verifyOrder, cancelSale, refreshSales, exportSalesData,
       customers, addCustomer, updateCustomer, repayDebt, findOrCreateCustomer,
-      tables, bookings, addTable, updateTable, addBooking, startTableSession, finishTableOrder, confirmOrderItems, updateOrderItemStatus, removeItemFromOrder,
+      tables, bookings, addTable, updateTable, addBooking, updateBooking, deleteBooking, startTableSession, finishTableOrder, confirmOrderItems, updateOrderItemStatus, removeItemFromOrder,
       addExpense, getDashboardMetrics,
       discountRules, addDiscountRule, deleteDiscountRule,
       paymentMethods, addPaymentMethod, updatePaymentMethod, deletePaymentMethod,
