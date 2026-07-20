@@ -1,5 +1,5 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode, useMemo } from 'react';
-import { supabase, setSupabaseStaffHeaders } from '../services/supabaseClient';
+import React, { createContext, useContext, useState, useEffect, useRef, ReactNode, useMemo } from 'react';
+import { supabase, setSupabaseStaffToken } from '../services/supabaseClient';
 import { DB_CONSTANTS } from '../services/supabaseSchema';
 import { printer } from '../services/printerService';
 import { dbWrite, initSync, onQueueChange, getQueueLength } from '../services/syncQueue';
@@ -10,6 +10,47 @@ import {
 } from '../types';
 
 export type LanguageCode = 'en' | 'km' | 'zh' | 'ja' | 'ko';
+
+// --- Staff session persistence & offline PIN verification helpers ---
+// The server mints a session token after verifying the PIN (bcrypt, server-side).
+// For OFFLINE staff switching on a shared device we keep a local SHA-256 digest
+// of each successfully-used PIN — never the PIN itself — and mint the real
+// token once connectivity returns (owner_activate_staff).
+const STAFF_SESSION_KEY = 'haang_staff_session_v1';
+const PIN_CACHE_KEY = 'haang_pin_cache_v1';
+
+const hashPinLocal = async (pin: string): Promise<string | null> => {
+  try {
+    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(pin));
+    return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+  } catch {
+    return null;
+  }
+};
+
+const readPinCache = (): Record<string, string> => {
+  try { return JSON.parse(localStorage.getItem(PIN_CACHE_KEY) || '{}'); } catch { return {}; }
+};
+
+const seedPinCache = async (staffId: string, pin: string) => {
+  const digest = await hashPinLocal(pin);
+  if (!digest) return;
+  const cache = readPinCache();
+  cache[staffId] = digest;
+  try { localStorage.setItem(PIN_CACHE_KEY, JSON.stringify(cache)); } catch { /* ignore */ }
+};
+
+const verifyPinOffline = async (staffId: string, pin: string): Promise<boolean> => {
+  const digest = await hashPinLocal(pin);
+  if (!digest) return false;
+  return readPinCache()[staffId] === digest;
+};
+
+const isNetworkFailure = (e: any): boolean => {
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return true;
+  const msg = String(e?.message || e || '').toLowerCase();
+  return msg.includes('failed to fetch') || msg.includes('networkerror') || msg.includes('network request failed') || msg.includes('load failed');
+};
 
 interface StoreContextType {
   user: any;
@@ -31,7 +72,8 @@ interface StoreContextType {
   staffList: Staff[];
   activeStaff: Staff | null;
   loginAsStaff: (phone: string, pin: string) => Promise<boolean>;
-  switchStaff: (pin: string, staffId?: string) => boolean;
+  switchStaff: (pin: string, staffId?: string) => Promise<boolean>;
+  activateStaffAsOwner: (staffId: string) => Promise<boolean>;
   logoutStaff: () => void;
   addStaff: (staff: Partial<Staff>) => Promise<void>;
   updateStaff: (id: string, updates: Partial<Staff>) => Promise<void>;
@@ -221,6 +263,11 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [staffList, setStaffList] = useState<Staff[]>([]);
   const [activeStaff, setActiveStaff] = useState<Staff | null>(null);
+  // Server-minted staff session token (null while offline-activated, pending mint)
+  const [staffToken, setStaffTokenState] = useState<string | null>(null);
+  // True while a standalone staff login session (no Supabase auth user) is active,
+  // so the auth listener's signed-out branch doesn't wipe the loaded shop.
+  const staffSessionRef = useRef(false);
   const [tables, setTables] = useState<Table[]>([]);
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [discountRules, setDiscountRules] = useState<DiscountRule[]>([]);
@@ -254,21 +301,23 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     // Use getSession() (reads the persisted session from local storage, no
     // network) instead of getUser() (which validates against the auth server).
     // This lets a previously-authenticated user stay signed in while OFFLINE.
-    supabase.auth.getSession().then(({ data }) => {
+    supabase.auth.getSession().then(async ({ data }) => {
         const sessionUser = data.session?.user;
         if (sessionUser) {
             setUser(sessionUser);
             loadShopData(sessionUser.id);
-        } else {
-            setLoadingAuth(false);
+            return;
         }
+        // No owner session — try restoring a persisted staff login session.
+        const restored = await restoreStaffSession();
+        if (!restored) setLoadingAuth(false);
     }).catch(() => setLoadingAuth(false));
 
     const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
         if (session?.user) {
             setUser(session.user);
             loadShopData(session.user.id);
-        } else {
+        } else if (!staffSessionRef.current) {
             setUser(null);
             setCurrentShop(null);
             setLoadingAuth(false);
@@ -278,9 +327,56 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     return () => authListener.subscription.unsubscribe();
   }, []);
 
+  const setStaffToken = (token: string | null) => {
+      setSupabaseStaffToken(token);
+      setStaffTokenState(token);
+  };
+
+  /** Restore a persisted phone+PIN staff session (standalone staff device). */
+  const restoreStaffSession = async (): Promise<boolean> => {
+      let saved: { token: string; staff: Staff } | null = null;
+      try { saved = JSON.parse(localStorage.getItem(STAFF_SESSION_KEY) || 'null'); } catch { saved = null; }
+      if (!saved?.token || !saved?.staff?.shopId) return false;
+
+      setSupabaseStaffToken(saved.token);
+      try {
+          const { data, error } = await supabase.rpc(DB_CONSTANTS.RPC_VALIDATE_STAFF_SESSION);
+          if (error || !data || data.length === 0) {
+              // Expired / revoked server-side — clear it.
+              localStorage.removeItem(STAFF_SESSION_KEY);
+              setSupabaseStaffToken(null);
+              return false;
+          }
+          const s = data[0];
+          staffSessionRef.current = true;
+          setStaffTokenState(saved.token);
+          setActiveStaff({ id: s.id, shopId: s.shop_id, name: s.name, role: s.role, avatarUrl: s.avatar_url });
+          await loadShopData({ shopId: s.shop_id });
+          return true;
+      } catch {
+          // Offline: trust the cached session until we can validate.
+          staffSessionRef.current = true;
+          setStaffTokenState(saved.token);
+          setActiveStaff(saved.staff);
+          await loadShopData({ shopId: saved.staff.shopId });
+          return true;
+      }
+  };
+
+  // Offline staff activation leaves us without a server session token. Once the
+  // owner-authenticated device is back online, mint the real token silently.
   useEffect(() => {
-    setSupabaseStaffHeaders(activeStaff?.role, activeStaff?.id);
-  }, [activeStaff]);
+      const mintIfNeeded = async () => {
+          if (!user || !activeStaff || staffToken || navigator.onLine === false) return;
+          try {
+              const { data } = await supabase.rpc(DB_CONSTANTS.RPC_OWNER_ACTIVATE_STAFF, { _staff_id: activeStaff.id });
+              if (data && data.length > 0) setStaffToken(data[0].session_token);
+          } catch { /* retry on next reconnect */ }
+      };
+      mintIfNeeded();
+      window.addEventListener('online', mintIfNeeded);
+      return () => window.removeEventListener('online', mintIfNeeded);
+  }, [user, activeStaff, staffToken]);
 
   const loadShopData = async (param: string | { shopId: string }) => {
       setLoadingAuth(true);
@@ -313,7 +409,8 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
               const [pRes, cRes, stRes, tRes, bRes, dRes, pmRes, sRes] = await Promise.all([
                   supabase.from(DB_CONSTANTS.TABLE_PRODUCTS).select('*').eq('shop_id', shop.id),
                   supabase.from(DB_CONSTANTS.TABLE_CUSTOMERS).select('*').eq('shop_id', shop.id),
-                  supabase.from(DB_CONSTANTS.TABLE_STAFF).select('*').eq('shop_id', shop.id),
+                  // PIN hashes are never selected — column privileges block them anyway.
+                  supabase.from(DB_CONSTANTS.TABLE_STAFF).select('id, shop_id, name, role, avatar_url, has_pin').eq('shop_id', shop.id),
                   supabase.from(DB_CONSTANTS.TABLE_TABLES).select('*').eq('shop_id', shop.id),
                   supabase.from(DB_CONSTANTS.TABLE_BOOKINGS).select('*').eq('shop_id', shop.id),
                   supabase.from(DB_CONSTANTS.TABLE_DISCOUNTS).select('*').eq('shop_id', shop.id),
@@ -323,7 +420,7 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
               if(pRes.data) setProducts(pRes.data.map((p: any) => ({...p, shopId: p.shop_id, imageUrl: p.image_url, trackStock: p.track_stock})));
               if(cRes.data) setCustomers(cRes.data.map((c: any) => ({...c, shopId: c.shop_id, totalDebt: c.total_debt, lastInteraction: c.last_interaction})));
-              if(stRes.data) setStaffList(stRes.data.map((s: any) => ({...s, shopId: s.shop_id})));
+              if(stRes.data) setStaffList(stRes.data.map((s: any) => ({id: s.id, shopId: s.shop_id, name: s.name, role: s.role, avatarUrl: s.avatar_url, hasPin: s.has_pin})));
               if(tRes.data) setTables(tRes.data.map((t: any) => ({...t, shopId: t.shop_id, allowOrdering: t.allow_ordering})));
               if(bRes.data) setBookings(bRes.data.map((b: any) => ({...b, shopId: b.shop_id, customerName: b.customer_name, tableId: b.table_id})));
               if(dRes.data) setDiscountRules(dRes.data.map((d: any) => ({...d, shopId: d.shop_id})));
@@ -394,44 +491,132 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       }); 
   };
   const signInAsDemoUser = async () => { };
-  const signOut = async () => { await supabase.auth.signOut(); setActiveStaff(null); };
+  const signOut = async () => {
+      if (staffToken) { try { await supabase.rpc(DB_CONSTANTS.RPC_STAFF_LOGOUT, { _token: staffToken }); } catch { /* best effort */ } }
+      staffSessionRef.current = false;
+      localStorage.removeItem(STAFF_SESSION_KEY);
+      setStaffToken(null);
+      setActiveStaff(null);
+      await supabase.auth.signOut();
+      // Standalone staff sessions have no Supabase auth session, so the auth
+      // listener will not fire — clear the app state explicitly.
+      setUser(null);
+      setCurrentShop(null);
+  };
 
   const loginAsStaff = async (phone: string, pin: string) => {
-      const { data, error } = await supabase.rpc(DB_CONSTANTS.RPC_STAFF_LOGIN, { phone_number: phone, pin_code: pin });
+      const { data } = await supabase.rpc(DB_CONSTANTS.RPC_STAFF_LOGIN, { phone_number: phone, pin_code: pin });
       if (data && data.length > 0) {
           const s = data[0];
           const loggedStaff: Staff = {
               id: s.id,
               shopId: s.shop_id,
               name: s.name,
-              pin: pin,
               role: s.role,
               avatarUrl: s.avatar_url
           };
+          staffSessionRef.current = true;
+          // Set the token header BEFORE loading shop data — RLS needs it.
+          setStaffToken(s.session_token);
           setActiveStaff(loggedStaff);
+          try { localStorage.setItem(STAFF_SESSION_KEY, JSON.stringify({ token: s.session_token, staff: loggedStaff })); } catch { /* ignore */ }
+          await seedPinCache(s.id, pin);
           await loadShopData({ shopId: s.shop_id });
           return true;
       }
       return false;
   };
-  const switchStaff = (pin: string, staffId?: string) => {
-      const staff = staffList.find(s => s.pin === pin && (staffId ? s.id === staffId : true));
-      if (staff) { setActiveStaff(staff); return true; }
-      return false;
+
+  /**
+   * Lock-screen operator switch. The PIN is verified SERVER-SIDE
+   * (staff_switch RPC) and a session token is minted. When the shared device
+   * is offline, fall back to the locally-cached SHA-256 digest of the PIN and
+   * mint the real token on reconnect (owner_activate_staff).
+   */
+  const switchStaff = async (pin: string, staffId?: string): Promise<boolean> => {
+      const target = staffId ? staffList.find(s => s.id === staffId) : null;
+      try {
+          if (staffId) {
+              const { data, error } = await supabase.rpc(DB_CONSTANTS.RPC_STAFF_SWITCH, { _staff_id: staffId, _pin: pin });
+              if (error) throw error;
+              if (data && data.length > 0) {
+                  const s = data[0];
+                  setStaffToken(s.session_token);
+                  setActiveStaff({ id: s.id, shopId: s.shop_id, name: s.name, role: s.role, avatarUrl: s.avatar_url, hasPin: true });
+                  await seedPinCache(s.id, pin);
+                  return true;
+              }
+              return false;
+          }
+          // No staff id — legacy call shape; cannot verify server-side safely.
+          return false;
+      } catch (e) {
+          if (isNetworkFailure(e) && target && await verifyPinOffline(target.id, pin)) {
+              // Offline shared-device switch: activate locally; token minted on reconnect.
+              setStaffToken(null);
+              setActiveStaff(target);
+              return true;
+          }
+          console.error('switchStaff failed', e);
+          return false;
+      }
   };
-  const logoutStaff = () => { setActiveStaff(null); };
+
+  /** Owner-authorized activation without a PIN (single-role auto-login). */
+  const activateStaffAsOwner = async (staffId: string): Promise<boolean> => {
+      const target = staffList.find(s => s.id === staffId);
+      try {
+          const { data, error } = await supabase.rpc(DB_CONSTANTS.RPC_OWNER_ACTIVATE_STAFF, { _staff_id: staffId });
+          if (error) throw error;
+          if (data && data.length > 0) {
+              const s = data[0];
+              setStaffToken(s.session_token);
+              setActiveStaff({ id: s.id, shopId: s.shop_id, name: s.name, role: s.role, avatarUrl: s.avatar_url, hasPin: true });
+              return true;
+          }
+          return false;
+      } catch (e) {
+          if (isNetworkFailure(e) && target) {
+              // Offline: the owner auth session is the authority; mint on reconnect.
+              setStaffToken(null);
+              setActiveStaff(target);
+              return true;
+          }
+          console.error('activateStaffAsOwner failed', e);
+          return false;
+      }
+  };
+
+  const logoutStaff = () => {
+      if (staffToken) { supabase.rpc(DB_CONSTANTS.RPC_STAFF_LOGOUT, { _token: staffToken }).then(() => {}, () => {}); }
+      setStaffToken(null);
+      setActiveStaff(null);
+  };
+
   const addStaff = async (staff: Partial<Staff>) => {
       if (!currentShop) return;
-      const newStaff = { ...staff, id: generateId(), shop_id: currentShop.id };
-      await supabase.from(DB_CONSTANTS.TABLE_STAFF).insert(newStaff);
-      setStaffList(prev => [...prev, { ...staff, id: newStaff.id, shopId: currentShop.id } as Staff]);
+      const id = generateId();
+      const { error } = await supabase.from(DB_CONSTANTS.TABLE_STAFF).insert({
+          id, shop_id: currentShop.id, name: staff.name, pin: staff.pin || '', role: staff.role, avatar_url: staff.avatarUrl
+      });
+      if (error) { console.error('addStaff failed', error); throw error; }
+      if (staff.pin) await seedPinCache(id, staff.pin);
+      setStaffList(prev => [...prev, { id, shopId: currentShop.id, name: staff.name || '', role: staff.role || 'cashier', avatarUrl: staff.avatarUrl, hasPin: !!staff.pin } as Staff]);
   };
   const updateStaff = async (id: string, updates: Partial<Staff>) => {
-      await supabase.from(DB_CONSTANTS.TABLE_STAFF).update(updates).eq('id', id);
-      setStaffList(prev => prev.map(s => s.id === id ? { ...s, ...updates } : s));
+      const payload: any = {};
+      if (updates.name !== undefined) payload.name = updates.name;
+      if (updates.role !== undefined) payload.role = updates.role;
+      if (updates.avatarUrl !== undefined) payload.avatar_url = updates.avatarUrl;
+      if (updates.pin !== undefined) payload.pin = updates.pin; // hashed by DB trigger
+      const { error } = await supabase.from(DB_CONSTANTS.TABLE_STAFF).update(payload).eq('id', id);
+      if (error) { console.error('updateStaff failed', error); throw error; }
+      if (updates.pin) await seedPinCache(id, updates.pin);
+      setStaffList(prev => prev.map(s => s.id === id ? { ...s, ...updates, pin: undefined, hasPin: updates.pin ? true : s.hasPin } : s));
   };
   const deleteStaff = async (id: string) => {
-      await supabase.from(DB_CONSTANTS.TABLE_STAFF).delete().eq('id', id);
+      const { error } = await supabase.from(DB_CONSTANTS.TABLE_STAFF).delete().eq('id', id);
+      if (error) { console.error('deleteStaff failed', error); throw error; }
       setStaffList(prev => prev.filter(s => s.id !== id));
   };
 
@@ -964,7 +1149,7 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       user, loadingAuth, currentShop, settings, language, setLanguage, t,
       createShop, updateShop, updateSettings,
       signInWithGoogle, signInAsDemoUser, signOut,
-      staffList, activeStaff, loginAsStaff, switchStaff, logoutStaff, addStaff, updateStaff, deleteStaff,
+      staffList, activeStaff, loginAsStaff, switchStaff, activateStaffAsOwner, logoutStaff, addStaff, updateStaff, deleteStaff,
       products, categories, addProduct, updateProduct, getProductActivities, fetchMoreActivities, hasMoreActivities, renameCategory, deleteCategory,
       cart, addToCart, removeFromCart, updateCartQuantity, clearCart, checkout, addManualSale, getBestDiscountForItem,
       sales, fetchMoreSales, hasMoreSales, verifyOrder, cancelSale, refreshSales, exportSalesData,

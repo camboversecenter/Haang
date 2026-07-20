@@ -175,7 +175,8 @@ export default function Settings() {
   const handleOpenStaffModal = (staff?: Staff) => {
       if (staff) {
           setEditingStaff(staff);
-          setStaffForm({ name: staff.name, pin: staff.pin, role: staff.role });
+          // PINs are hashed server-side and never readable — leave blank to keep the current PIN.
+          setStaffForm({ name: staff.name, pin: '', role: staff.role });
       } else {
           setEditingStaff(null);
           setStaffForm({ name: '', pin: '', role: 'cashier' });
@@ -184,30 +185,40 @@ export default function Settings() {
   };
 
   const handleSaveStaff = async () => {
-      if (!staffForm.name || !staffForm.pin) {
+      if (!staffForm.name || (!editingStaff && !staffForm.pin)) {
           showToast(t('toast.fill_name_pin'), "error");
           return;
       }
-      if (staffForm.pin.length !== 6) {
+      if (staffForm.pin && staffForm.pin.length !== 6) {
           showToast(t('toast.pin_len'), "error");
           return;
       }
 
-      if (editingStaff) {
-          await updateStaff(editingStaff.id, staffForm);
-          showToast(t('toast.staff_updated'), "success");
-      } else {
-          await addStaff(staffForm);
-          showToast(t('toast.staff_added'), "success");
+      try {
+          if (editingStaff) {
+              const updates: Partial<Staff> = { name: staffForm.name, role: staffForm.role };
+              if (staffForm.pin) updates.pin = staffForm.pin; // empty = keep current PIN
+              await updateStaff(editingStaff.id, updates);
+              showToast(t('toast.staff_updated'), "success");
+          } else {
+              await addStaff(staffForm);
+              showToast(t('toast.staff_added'), "success");
+          }
+          setShowStaffModal(false);
+      } catch {
+          showToast(t('toast.save_failed') !== 'toast.save_failed' ? t('toast.save_failed') : 'Could not save staff — check your permissions.', "error");
       }
-      setShowStaffModal(false);
   };
 
   const handleDeleteStaff = async (id: string) => {
       const confirm = await showConfirm(t('confirm.del_staff_title'), t('confirm.del_staff_msg'));
       if (confirm) {
-          await deleteStaff(id);
-          showToast(t('toast.staff_deleted'), "success");
+          try {
+              await deleteStaff(id);
+              showToast(t('toast.staff_deleted'), "success");
+          } catch {
+              showToast('Could not delete staff — check your permissions.', "error");
+          }
       }
   };
 
