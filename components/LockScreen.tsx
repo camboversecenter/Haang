@@ -246,11 +246,21 @@ export const LockScreen = ({ children }: { children?: React.ReactNode }) => {
                       </div>
                   )}
 
-                  <div className="mb-8 flex gap-4 items-center">
+                  <div className="mb-3 flex gap-4 items-center">
                       {Array.from({ length: 6 }).map((_, i) => (
-                          <div key={i} className={`w-4.5 h-4.5 rounded-full transition-all duration-150 ${pin.length > i ? 'bg-brand-400 scale-110 shadow-[0_0_12px_rgba(99,102,241,0.7)]' : 'bg-slate-700'} ${error ? 'bg-red-500 animate-shake' : ''}`}></div>
+                          <div key={i} className={`w-4 h-4 rounded-full transition-all duration-150 ${error ? 'bg-red-500 animate-shake' : pin.length > i ? 'bg-brand-400 scale-110 shadow-[0_0_12px_rgba(99,102,241,0.7)]' : 'bg-slate-700'}`}></div>
                       ))}
                       {verifying && <Loader2 size={16} className="animate-spin text-brand-400" />}
+                  </div>
+
+                  <div className="h-5 mb-6 text-center">
+                      {error && (
+                          <p className="text-sm font-bold text-red-400 animate-shake">
+                              {step === 'set_new_2'
+                                  ? (language === 'km' ? 'លេខកូដមិនត្រូវគ្នា' : 'PINs do not match')
+                                  : (language === 'km' ? 'លេខកូដមិនត្រឹមត្រូវ' : 'Wrong PIN')}
+                          </p>
+                      )}
                   </div>
 
                   <div className="grid grid-cols-3 gap-4 w-full max-w-[280px]">
