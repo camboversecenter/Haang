@@ -43,6 +43,49 @@ export default function Landing({ onGetStarted }: LandingProps) {
     { n: '3', title: tx('Start selling', 'ចាប់ផ្តើមលក់'), desc: tx('Ring up sales, print receipts, share a QR menu, and track your profit.', 'លក់ បោះពុម្ពវិក្កយបត្រ ចែករំលែកម៉ឺនុយ QR និងតាមដានប្រាក់ចំណេញ។') },
   ];
 
+  // Team members — role is "Member" for everyone; names come from the photo files.
+  const team = [
+    { name: 'Heng Kimleng', img: '/Team/heng-kimleng.jpg' },
+    { name: 'Heng Sayritok', img: '/Team/heng-sayritok.jpg' },
+    { name: 'Hout RatanakVisoth', img: '/Team/hout-ratanakvisoth.jpg' },
+    { name: 'Khon Phinil', img: '/Team/khon-phinil.jpg' },
+    { name: 'Ly Kuongkeat', img: '/Team/ly-kuongkeat.jpg' },
+    { name: 'Ponlork Sreyka', img: '/Team/ponlork-sreyka.jpg' },
+    { name: 'Sarom Thavireak', img: '/Team/sarom-thavireak.jpg' },
+    { name: 'Sok Socheata', img: '/Team/sok-socheata.jpg' },
+  ];
+
+  // Partners & supporters.
+  const partners = [
+    {
+      initials: 'NUM',
+      name: 'National University of Management',
+      role: tx('Host University', 'សាកលវិទ្យាល័យម្ចាស់ផ្ទះ'),
+      desc: tx('Haang is hosted at the National University of Management in Phnom Penh.', 'Haang ស្ថិតនៅសាកលវិទ្យាល័យជាតិគ្រប់គ្រង នៅរាជធានីភ្នំពេញ។'),
+      site: 'num.edu.kh',
+      href: 'https://num.edu.kh',
+      color: 'from-blue-500 to-indigo-600',
+    },
+    {
+      initials: 'CV',
+      name: 'CamboVerse Center',
+      role: tx('Incubator', 'អ្នកបណ្ដុះបណ្ដាលគម្រោង'),
+      desc: tx('The CamboVerse Center at NUM incubates Haang and supports Cambodian technology projects.', 'មជ្ឈមណ្ឌល CamboVerse នៅ NUM បណ្ដុះបណ្ដាល Haang និងគាំទ្រគម្រោងបច្ចេកវិទ្យាកម្ពុជា។'),
+      site: 'camboverse.world',
+      href: 'https://camboverse.world',
+      color: 'from-emerald-500 to-teal-600',
+    },
+    {
+      initials: 'EK',
+      name: 'E-KHMER Technology Co., Ltd.',
+      role: tx('Technology Partner', 'ដៃគូបច្ចេកវិទ្យា'),
+      desc: tx('E-KHMER contributes engineering and technical support to the platform.', 'E-KHMER រួមចំណែកផ្នែកវិស្វកម្ម និងជំនួយបច្ចេកទេសដល់វេទិកានេះ។'),
+      site: 'e-khmer.com',
+      href: 'https://e-khmer.com',
+      color: 'from-orange-500 to-rose-600',
+    },
+  ];
+
   return (
     <div className="min-h-[100dvh] w-full overflow-y-auto bg-white text-slate-800 font-sans">
       {/* ---------- NAV ---------- */}
@@ -53,6 +96,7 @@ export default function Landing({ onGetStarted }: LandingProps) {
             <a href="#features" className={scrolled ? 'text-slate-600 hover:text-brand-600' : 'text-white/80 hover:text-white'}>{tx('Features', 'មុខងារ')}</a>
             <a href="#how" className={scrolled ? 'text-slate-600 hover:text-brand-600' : 'text-white/80 hover:text-white'}>{tx('How it works', 'របៀបប្រើ')}</a>
             <a href="#pricing" className={scrolled ? 'text-slate-600 hover:text-brand-600' : 'text-white/80 hover:text-white'}>{tx('Pricing', 'តម្លៃ')}</a>
+            <a href="#about" className={scrolled ? 'text-slate-600 hover:text-brand-600' : 'text-white/80 hover:text-white'}>{tx('About', 'អំពីយើង')}</a>
           </nav>
           <div className="flex items-center gap-2">
             <button
@@ -77,6 +121,7 @@ export default function Landing({ onGetStarted }: LandingProps) {
             <a href="#features" onClick={() => setMenuOpen(false)}>{tx('Features', 'មុខងារ')}</a>
             <a href="#how" onClick={() => setMenuOpen(false)}>{tx('How it works', 'របៀបប្រើ')}</a>
             <a href="#pricing" onClick={() => setMenuOpen(false)}>{tx('Pricing', 'តម្លៃ')}</a>
+            <a href="#about" onClick={() => setMenuOpen(false)}>{tx('About', 'អំពីយើង')}</a>
             <button onClick={onGetStarted} className="mt-1 flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl bg-brand-600 text-white">
               {tx('Sign In', 'ចូលប្រើ')} <ArrowRight size={14} />
             </button>
@@ -269,6 +314,78 @@ export default function Landing({ onGetStarted }: LandingProps) {
             >
               {tx('Create your free shop', 'បង្កើតហាងឥតគិតថ្លៃ')} <ArrowRight size={18} />
             </button>
+          </div>
+        </div>
+      </section>
+
+      {/* ---------- ABOUT US ---------- */}
+      <section id="about" className="bg-slate-50 border-t border-gray-100 py-20 md:py-28">
+        <div className="max-w-6xl mx-auto px-5">
+          <div className="text-center mb-14">
+            <p className="text-brand-600 font-bold text-sm uppercase tracking-wider mb-2">{tx('About Us', 'អំពីយើង')}</p>
+            <h2 className={`text-3xl md:text-4xl font-black text-slate-900 mb-4 ${km ? 'font-display' : ''}`}>
+              {tx('The people behind Haang', 'ក្រុមការងារនៅពីក្រោយ Haang')}
+            </h2>
+            <p className={`max-w-2xl mx-auto text-slate-600 text-lg leading-relaxed ${km ? 'font-display' : ''}`}>
+              {tx(
+                'Haang is built by a student and volunteer team, incubated by the CamboVerse Center at the National University of Management (NUM).',
+                'Haang ត្រូវបានបង្កើតឡើងដោយក្រុមនិស្សិត និងអ្នកស្ម័គ្រចិត្ត ស្ថិតក្រោមការបណ្ដុះបណ្ដាលពីមជ្ឈមណ្ឌល CamboVerse នៃសាកលវិទ្យាល័យជាតិគ្រប់គ្រង (NUM)។'
+              )}
+            </p>
+          </div>
+
+          {/* Team members — circular frames */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-x-6 gap-y-10 mb-20">
+            {team.map((m, i) => (
+              <div key={i} className="flex flex-col items-center text-center">
+                <div className="relative">
+                  <div className="absolute -inset-1 rounded-full bg-gradient-to-br from-brand-500/30 to-accent-500/30 blur-[6px]" />
+                  <img
+                    src={m.img}
+                    alt={m.name}
+                    loading="lazy"
+                    width={400}
+                    height={400}
+                    className="relative w-28 h-28 md:w-32 md:h-32 rounded-full object-cover ring-4 ring-white shadow-lg shadow-brand-500/10"
+                  />
+                </div>
+                <h3 className={`mt-4 font-bold text-slate-900 leading-tight ${km ? 'font-display' : ''}`}>{m.name}</h3>
+                <p className="text-sm text-brand-600 font-semibold mt-0.5">{tx('Member', 'សមាជិក')}</p>
+              </div>
+            ))}
+          </div>
+
+          {/* Partners & supporters */}
+          <div className="text-center mb-12">
+            <h3 className={`text-2xl md:text-3xl font-black text-slate-900 mb-3 ${km ? 'font-display' : ''}`}>
+              {km ? 'ដៃគូ និងអ្នកគាំទ្រ' : 'Partners and supporters'}
+            </h3>
+            <p className={`max-w-2xl mx-auto text-slate-600 leading-relaxed ${km ? 'font-display' : ''}`}>
+              {tx(
+                'Haang is incubated by the CamboVerse Center at the National University of Management.',
+                'Haang ស្ថិតក្រោមការបណ្ដុះបណ្ដាលពីមជ្ឈមណ្ឌល CamboVerse នៃសាកលវិទ្យាល័យជាតិគ្រប់គ្រង។'
+              )}
+            </p>
+          </div>
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
+            {partners.map((p, i) => (
+              <div key={i} className="bg-white rounded-3xl border border-gray-100 shadow-card p-8 flex flex-col items-center text-center hover:shadow-soft transition-shadow">
+                <div className={`w-20 h-20 rounded-2xl bg-gradient-to-br ${p.color} text-white flex items-center justify-center font-black text-xl tracking-tight shadow-lg mb-5`}>
+                  {p.initials}
+                </div>
+                <h4 className={`font-black text-lg text-slate-900 ${km ? 'font-display' : ''}`}>{p.name}</h4>
+                <p className="text-brand-600 font-bold text-xs uppercase tracking-wider mt-1 mb-3">{p.role}</p>
+                <p className="text-sm text-slate-500 leading-relaxed mb-5">{p.desc}</p>
+                <a
+                  href={p.href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="mt-auto inline-flex items-center gap-1.5 text-sm font-semibold text-slate-500 hover:text-brand-600 transition-colors"
+                >
+                  <Globe size={15} /> {p.site}
+                </a>
+              </div>
+            ))}
           </div>
         </div>
       </section>
