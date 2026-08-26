@@ -1,12 +1,51 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { GoogleGenAI } from "npm:@google/genai@0.2.0";
+import { createClient } from "npm:@supabase/supabase-js@2";
 
 declare const Deno: any;
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+};
+
+/**
+ * Every AI action here spends the project's GEMINI_API_KEY, so the caller must
+ * be a real operator — a signed-in shop owner, or a staff member holding a
+ * server-minted session token. The platform's default JWT gate only proves the
+ * request carried *some* project key, and the anon key ships inside the public
+ * browser bundle, so without this check anyone on the internet could drain the
+ * AI quota.
+ */
+const authorizeCaller = async (req: Request): Promise<boolean> => {
+  const supabaseUrl = Deno.env.get('SUPABASE_URL');
+  const anonKey = Deno.env.get('SUPABASE_ANON_KEY');
+  if (!supabaseUrl || !anonKey) return false;
+
+  const authHeader = req.headers.get('Authorization') ?? '';
+  const staffToken = req.headers.get('x-staff-token') ?? '';
+
+  // 1. Google-authenticated shop owner: the bearer token must resolve to a user.
+  const bearer = authHeader.replace(/^Bearer\s+/i, '').trim();
+  if (bearer && bearer !== anonKey) {
+    const client = createClient(supabaseUrl, anonKey, {
+      global: { headers: { Authorization: `Bearer ${bearer}` } },
+    });
+    const { data, error } = await client.auth.getUser();
+    if (!error && data?.user) return true;
+  }
+
+  // 2. Staff operator: validate the session token server-side via RLS-backed RPC.
+  if (staffToken) {
+    const client = createClient(supabaseUrl, anonKey, {
+      global: { headers: { 'x-staff-token': staffToken } },
+    });
+    const { data, error } = await client.rpc('validate_staff_session');
+    if (!error && Array.isArray(data) && data.length > 0) return true;
+  }
+
+  return false;
 };
 
 serve(async (req) => {
@@ -16,6 +55,13 @@ serve(async (req) => {
   }
 
   try {
+    if (!(await authorizeCaller(req))) {
+      return new Response(
+        JSON.stringify({ error: 'Unauthorized: sign in or start a staff session to use AI features.' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+      );
+    }
+
     const apiKey = Deno.env.get('GEMINI_API_KEY');
     if (!apiKey) {
       throw new Error('GEMINI_API_KEY is not set in Edge Function secrets.');

@@ -26,7 +26,7 @@ Every table has RLS enabled. Data is scoped per shop, and both reads and writes 
   - `get_table_order(shop_id, table_id)` — the open order for a physical table.
   - `public_append_order_item` / `public_remove_order_item` — QR self-ordering. These lock the order row (no lost updates), **re-price items from the catalog** (clients cannot set prices), only touch open orders, and only let customers remove still-pending items.
   - `public_attach_payment`, `public_link_customer`, `public_find_or_create_customer`, `public_get_order_customer` — payment proof + customer linkage without exposing the customers table.
-- **Storage** — a public `Haang` bucket holds images/receipts; uploads are restricted to image types (`png/jpg/jpeg/webp`) and non-`private` folders.
+- **Storage** — a public `Haang` bucket holds images/receipts. Uploads are restricted to image types (`png/jpg/jpeg/webp`) and non-`private` folders, and stay open to anonymous callers because QR-checkout customers upload their own payment proof. **Listing and deleting objects require an authenticated session** — an earlier policy allowed any anonymous caller to enumerate the bucket (exposing payment proofs) and to delete every file in it. ⚠️ Because the bucket is public, objects remain readable by anyone who knows the URL; move payment proofs to a private bucket with signed URLs before treating them as confidential financial records.
 
 The full schema, policies, RPCs, and triggers live in `supabase/rbac_policies.sql` (re-runnable — run it in the SQL editor to upgrade an existing project; it hashes any legacy plaintext PINs on the spot).
 

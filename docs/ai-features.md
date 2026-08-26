@@ -53,3 +53,4 @@ All AI actions accept a `language` parameter and are prompted to respond in that
 
 - Only the minimal necessary data (summaries, a product name, or a single image) is sent per call.
 - Because calls run server-side, the API key and quota are controlled centrally and can be rotated without shipping a new client build.
+- The `gemini-api` function **verifies the caller** before spending any quota: the request must carry either a signed-in owner's session or a valid staff session token (`x-staff-token`). The project's anon key alone is not sufficient — it ships inside the public browser bundle, so accepting it would let anyone on the internet drain the AI budget.

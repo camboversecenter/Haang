@@ -1,5 +1,5 @@
 
-import { supabase } from "./supabaseClient";
+import { supabase, getSupabaseStaffToken } from "./supabaseClient";
 import { Sale, Product, Booking, Table } from "../types";
 
 // Helper to format currency
@@ -36,8 +36,13 @@ const base64ToFile = (base64Data: string, filename: string): File => {
  * Invokes the 'gemini-api' Edge Function securely.
  */
 const invokeGemini = async (action: string, payload: any) => {
+  // Function calls don't inherit the REST staff header, so forward it here —
+  // the endpoint rejects callers that are neither a signed-in owner nor an
+  // active staff session.
+  const staffToken = getSupabaseStaffToken();
   const { data, error } = await supabase.functions.invoke('gemini-api', {
-    body: { action, payload }
+    body: { action, payload },
+    ...(staffToken ? { headers: { 'x-staff-token': staffToken } } : {}),
   });
 
   if (error) {

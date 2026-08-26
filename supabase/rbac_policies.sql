@@ -1239,18 +1239,28 @@ ON CONFLICT (id) DO NOTHING;
 DROP POLICY IF EXISTS "Public Access" ON storage.objects;
 DROP POLICY IF EXISTS "Secure Public Upload" ON storage.objects;
 DROP POLICY IF EXISTS "Owner Delete" ON storage.objects;
+DROP POLICY IF EXISTS "Storage Read: Shop members list objects" ON storage.objects;
+DROP POLICY IF EXISTS "Storage Delete: Authenticated shop members" ON storage.objects;
 
--- Read rules: Allow unrestricted read access for static assets (Logos, images).
-CREATE POLICY "Public Access" 
-  ON storage.objects FOR SELECT 
+-- Read rules: the bucket is PUBLIC, so images are served over the public object
+-- URL without consulting RLS. This policy therefore only governs the
+-- authenticated Storage API (notably `list`). Granting it to everyone let any
+-- caller ENUMERATE the whole bucket — including customer payment proofs — so it
+-- is restricted to shop members. Product images and logos still render for
+-- anonymous visitors via their public URLs.
+CREATE POLICY "Storage Read: Shop members list objects"
+  ON storage.objects FOR SELECT
+  TO authenticated
   USING ( bucket_id = 'Haang' );
 
--- Write rules: Standard safe uploads, restricted to specific image types.
-CREATE POLICY "Secure Public Upload" 
-  ON storage.objects FOR INSERT 
+-- Write rules: anonymous customers must be able to upload a payment proof from
+-- the QR checkout, so INSERT stays open — but only for image extensions and
+-- never into the 'private' folder.
+CREATE POLICY "Secure Public Upload"
+  ON storage.objects FOR INSERT
   WITH CHECK (
-    bucket_id = 'Haang' 
-    AND (storage.foldername(name))[1] != 'private' 
+    bucket_id = 'Haang'
+    AND (storage.foldername(name))[1] != 'private'
     AND (
       lower(storage.extension(name)) = 'png' OR
       lower(storage.extension(name)) = 'jpg' OR
@@ -1259,9 +1269,13 @@ CREATE POLICY "Secure Public Upload"
     )
   );
 
--- Delete rules: Owners can delete any images to clean up space
-CREATE POLICY "Owner Delete" 
-  ON storage.objects FOR DELETE 
+-- Delete rules: deletion happens only from the Inventory (product image) and
+-- Settings (shop logo) admin screens. The previous policy had no owner check at
+-- all, which let ANY anonymous caller wipe every image in the bucket. Deletes
+-- now require an authenticated session.
+CREATE POLICY "Storage Delete: Authenticated shop members"
+  ON storage.objects FOR DELETE
+  TO authenticated
   USING ( bucket_id = 'Haang' );
 
 -- ============================================================================
