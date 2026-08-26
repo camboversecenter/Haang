@@ -58,34 +58,36 @@ export default function Landing({ onGetStarted }: LandingProps) {
     { name: 'Sok Socheata', img: '/Team/sok-socheata.jpg' },
   ];
 
-  // Partners & supporters.
+  // Partners & supporters. The three logos have very different aspect ratios
+  // (NUM is a square crest, the other two are wide wordmarks), so each carries
+  // its own height cap to keep them optically balanced on the same row.
   const partners = [
     {
-      initials: 'NUM',
+      logo: '/Logo/num.png',
+      logoClass: 'max-h-20',
       name: 'National University of Management',
       role: tx('Host University', 'សាកលវិទ្យាល័យម្ចាស់ផ្ទះ'),
       desc: tx('Haang is hosted at the National University of Management in Phnom Penh.', 'Haang ស្ថិតនៅសាកលវិទ្យាល័យជាតិគ្រប់គ្រង នៅរាជធានីភ្នំពេញ។'),
       site: 'num.edu.kh',
       href: 'https://num.edu.kh',
-      color: 'from-blue-500 to-indigo-600',
     },
     {
-      initials: 'CV',
+      logo: '/Logo/camboverse.png',
+      logoClass: 'max-h-12',
       name: 'CamboVerse Center',
       role: tx('Incubator', 'អ្នកបណ្ដុះបណ្ដាលគម្រោង'),
       desc: tx('The CamboVerse Center at NUM incubates Haang and supports Cambodian technology projects.', 'មជ្ឈមណ្ឌល CamboVerse នៅ NUM បណ្ដុះបណ្ដាល Haang និងគាំទ្រគម្រោងបច្ចេកវិទ្យាកម្ពុជា។'),
       site: 'camboverse.world',
       href: 'https://camboverse.world',
-      color: 'from-emerald-500 to-teal-600',
     },
     {
-      initials: 'EK',
+      logo: '/Logo/e-khmer.png',
+      logoClass: 'max-h-10',
       name: 'E-KHMER Technology Co., Ltd.',
       role: tx('Technology Partner', 'ដៃគូបច្ចេកវិទ្យា'),
       desc: tx('E-KHMER contributes engineering and technical support to the platform.', 'E-KHMER រួមចំណែកផ្នែកវិស្វកម្ម និងជំនួយបច្ចេកទេសដល់វេទិកានេះ។'),
       site: 'e-khmer.com',
       href: 'https://e-khmer.com',
-      color: 'from-orange-500 to-rose-600',
     },
   ];
 
@@ -373,8 +375,13 @@ export default function Landing({ onGetStarted }: LandingProps) {
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
             {partners.map((p, i) => (
               <div key={i} className="bg-white rounded-3xl border border-gray-100 shadow-card p-8 flex flex-col items-center text-center hover:shadow-soft transition-shadow">
-                <div className={`w-20 h-20 rounded-2xl bg-gradient-to-br ${p.color} text-white flex items-center justify-center font-black text-xl tracking-tight shadow-lg mb-5`}>
-                  {p.initials}
+                <div className="h-20 flex items-center justify-center mb-5">
+                  <img
+                    src={p.logo}
+                    alt={`${p.name} logo`}
+                    loading="lazy"
+                    className={`${p.logoClass} w-auto max-w-full object-contain`}
+                  />
                 </div>
                 <h4 className={`font-black text-lg text-slate-900 ${km ? 'font-display' : ''}`}>{p.name}</h4>
                 <p className="text-brand-600 font-bold text-xs uppercase tracking-wider mt-1 mb-3">{p.role}</p>
