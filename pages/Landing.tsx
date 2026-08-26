@@ -4,8 +4,11 @@ import { Logo } from '../components/Logo';
 import {
   ShoppingCart, LayoutGrid, Utensils, QrCode, Sparkles, WifiOff,
   ShieldCheck, Users, ArrowRight, Check, Globe, Printer, BarChart3,
-  Heart, Menu, X, Store, Star,
+  Heart, Menu, X, Store, Star, Send,
 } from 'lucide-react';
+
+/** Public support / community group. Update here — it is referenced app-wide. */
+export const TELEGRAM_SUPPORT_URL = 'https://t.me/+mjYSQ4XAMvFlNzc1';
 
 interface LandingProps {
   onGetStarted: () => void;
@@ -415,6 +418,17 @@ export default function Landing({ onGetStarted }: LandingProps) {
             <div>
               <h4 className="text-white font-bold text-sm mb-4">{tx('Community', 'សហគមន៍')}</h4>
               <ul className="space-y-2.5 text-sm">
+                <li>
+                  <a
+                    href={TELEGRAM_SUPPORT_URL}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-2 hover:text-white transition-colors"
+                  >
+                    <Send size={15} className="text-brand-400" />
+                    {tx('Support on Telegram', 'ជំនួយតាម Telegram')}
+                  </a>
+                </li>
                 <li><a href="?mode=license" className="hover:text-white transition-colors">{tx('Community License', 'អាជ្ញាប័ណ្ណសហគមន៍')}</a></li>
                 <li><span className="text-slate-400">{tx('Open source · Apache 2.0', 'បើកចំហ · Apache 2.0')}</span></li>
                 <li><span className="text-slate-400">{tx('Support · Donations · Training', 'គាំទ្រ · បរិច្ចាគ · បណ្តុះបណ្តាល')}</span></li>

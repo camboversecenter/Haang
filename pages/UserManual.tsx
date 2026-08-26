@@ -1,7 +1,8 @@
 
 import React from 'react';
 import { Logo } from '../components/Logo';
-import { ArrowLeft, BookOpen, ShoppingCart, Package, Utensils, BarChart3, Settings, ChefHat, Users, Printer, Database, Trash2 } from 'lucide-react';
+import { ArrowLeft, BookOpen, ShoppingCart, Package, Utensils, BarChart3, Settings, ChefHat, Users, Printer, Database, Trash2, Send } from 'lucide-react';
+import { TELEGRAM_SUPPORT_URL } from './Landing';
 
 export default function UserManual() {
   return (
@@ -178,6 +179,26 @@ export default function UserManual() {
                 <Trash2 size={16} />
                 <span>ចំណាំ៖ សូមធ្វើការ Export ទិន្នន័យលក់ (CSV) ជារៀងរាល់ខែ ប្រសិនបើអ្នកត្រូវការរក្សាទុកឯកសារយូរអង្វែង។</span>
             </div>
+          </div>
+
+          {/* Still stuck — route to the community support group. */}
+          <div className="bg-brand-50 rounded-2xl p-6 border border-brand-100">
+            <h3 className="text-xl font-display font-bold text-brand-900">នៅមានសំណួរ? (Still need help?)</h3>
+            <p className="text-slate-600 mt-2 leading-relaxed">
+              សូមចូលរួមក្រុមជំនួយ Telegram របស់យើង ដើម្បីសួរសំណួរ និងទទួលបានការគាំទ្រពីក្រុមការងារ។
+            </p>
+            <p className="text-slate-500 text-sm mt-1">
+              Join our Telegram group to ask questions and get support from the team.
+            </p>
+            <a
+              href={TELEGRAM_SUPPORT_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-2 mt-4 px-5 py-3 rounded-xl bg-brand-600 text-white font-bold text-sm hover:bg-brand-700 transition-colors active:scale-95"
+            >
+              <Send size={16} />
+              ចូលរួមក្រុមជំនួយ · Join Support Group
+            </a>
           </div>
         </div>
 
