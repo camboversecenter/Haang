@@ -4,8 +4,10 @@ import { useStore } from '../store/StoreContext';
 import { Lock, User, Delete, LogOut, Plus, KeyRound, Shield, Loader2 } from 'lucide-react';
 import { Logo } from './Logo';
 
+const DEFAULT_PIN = '123456';
+
 export const LockScreen = ({ children }: { children?: React.ReactNode }) => {
-  const { staffList, switchStaff, signOut, currentShop, user, t, addStaff, updateStaff, language } = useStore();
+  const { staffList, switchStaff, signOut, currentShop, user, t, addStaff, updateStaff, logoutStaff, language } = useStore();
   const [selectedStaffId, setSelectedStaffId] = useState<string | null>(null);
   const [pin, setPin] = useState('');
   const [error, setError] = useState(false);
@@ -34,6 +36,10 @@ export const LockScreen = ({ children }: { children?: React.ReactNode }) => {
       if (!success) {
         setError(true);
         setTimeout(() => setPin(''), 300);
+      } else if (entered === DEFAULT_PIN && staff.role === 'admin') {
+        logoutStaff();
+        setStep('set_new_1');
+        setPin('');
       }
     } else if (step === 'set_new_1') {
       setNewPin(entered);
@@ -80,9 +86,7 @@ export const LockScreen = ({ children }: { children?: React.ReactNode }) => {
   };
 
   const handleCreateDefaultAdmin = async () => {
-      // Use "123456" as default PIN for recovery
-      await addStaff({ name: 'Owner', pin: '123456', role: 'admin' });
-      // Reload will happen automatically via StoreContext update
+      await addStaff({ name: 'Owner', pin: DEFAULT_PIN, role: 'admin' });
   };
 
   const selectedStaff = staffList.find(s => s.id === selectedStaffId);
